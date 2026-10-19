@@ -1,8 +1,8 @@
 """Client minimo per il server locale di LM Studio.
 
-Scheletro da completare con Claude Code (slide 19-22):
-configurazione, messaggi, payload e chiamata HTTP.
-Import e gestione degli errori sono gia' presenti: conservarli.
+Legge una domanda dal terminale, la invia al modello configurato in .env
+e stampa la risposta. Ogni domanda e' una richiesta indipendente.
+Uscita con "esci" o Ctrl+C.
 """
 
 import os
