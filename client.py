@@ -11,21 +11,38 @@ import requests
 from dotenv import load_dotenv
 
 # --- Configurazione -------------------------------------------------------
-# DA COMPLETARE: caricare .env e leggere LM_BASE_URL e LM_MODEL,
-# senza scrivere URL o nome del modello nel codice.
+load_dotenv(".env", override=False)
+base_url = os.environ["LM_BASE_URL"].rstrip("/")
+model = os.environ["LM_MODEL"]
 
 # --- Messaggi -------------------------------------------------------------
-# DA COMPLETARE: un'istruzione "system" in italiano e una domanda "user" fissa.
+SYSTEM = "Rispondi in italiano."
+QUESTION = "Che cosa controllare se Python segnala FileNotFoundError?"
 
 # --- Payload --------------------------------------------------------------
-# DA COMPLETARE: dizionario con model, messages, temperature, max_tokens,
-# reasoning_effort ("none", senza ragionamento) e stream.
+payload = {
+    "model": model,
+    "messages": [
+        {"role": "system", "content": SYSTEM},
+        {"role": "user", "content": QUESTION},
+    ],
+    "temperature": 0.2,
+    "max_tokens": 180,
+    "reasoning_effort": "none",
+    "stream": False,
+}
 
 # --- Chiamata -------------------------------------------------------------
 try:
-    # DA COMPLETARE: inviare il payload a {base_url}/chat/completions,
-    # controllare lo stato HTTP e stampare choices[0].message.content.
-    print("client.py non ancora completato: vedere il piano concordato.")
+    response = requests.post(
+        f"{base_url}/chat/completions",
+        json=payload,
+        timeout=(5, 120),
+    )
+    response.raise_for_status()
+    data = response.json()
+    text = data["choices"][0]["message"]["content"]
+    print(text)
 except requests.exceptions.Timeout:
     print("Attesa scaduta: controllare server, carico e tempi.")
 except requests.exceptions.ConnectionError:

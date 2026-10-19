@@ -24,11 +24,11 @@ Client Python minimo che invia una domanda a un modello eseguito in locale con L
 Dalla radice della repository:
 
 ```powershell
-py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+py -m venv venv
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-In VS Code selezionare l'interprete `.venv` con **Python: Select Interpreter**.
+In VS Code selezionare l'interprete `venv` con **Python: Select Interpreter**.
 
 ## Configurazione
 
@@ -52,7 +52,7 @@ In VS Code selezionare l'interprete `.venv` con **Python: Select Interpreter**.
 ## Avvio
 
 ```powershell
-.\.venv\Scripts\python.exe client.py
+.\venv\Scripts\python.exe client.py
 ```
 
 ## Diagnosi rapida
