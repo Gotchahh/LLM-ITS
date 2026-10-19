@@ -1,6 +1,7 @@
 # Assistente del laboratorio
 - Obiettivo: un client Python per un modello locale.
-- client.py contiene il client: domanda da terminale, una richiesta per domanda.
+- client.py contiene il client: domanda da terminale, risposta in streaming,
+  cronologia della sessione in memoria.
 - README.md descrive la preparazione dell'ambiente.
 - requirements.txt contiene le dipendenze concordate.
 - Usare PowerShell nei comandi per Windows.
@@ -10,14 +11,16 @@
 - Non sono presenti test automatici in questo checkpoint.
 - Avvio dalla radice: .\venv\Scripts\python.exe client.py
 - Verifica manuale: due domande diverse, riga vuota, esci e Ctrl+C,
-  server fermo e ripristinato.
+  server fermo e ripristinato; nome ricordato nella sessione e
+  dimenticato al riavvio.
 
 ## Vincoli sul client
 - URL e modello solo da .env (LM_BASE_URL, LM_MODEL): mai valori fissi nel codice.
 - Conservare "reasoning_effort": "none" nel payload: senza, la risposta arriva vuota.
 - Mantenere distinti i messaggi di Timeout, ConnectionError e HTTPError.
 - Nessuna interfaccia grafica, applicazione web o framework.
-- La cronologia, quando prevista, resta in memoria: nessun file o database.
+- La cronologia resta in memoria: nessun file o database.
+- Una richiesta fallita non lascia la domanda nella cronologia.
 
 ## Metodo di lavoro
 - Prima leggere i file e proporre un piano; modificare solo dopo l'approvazione.

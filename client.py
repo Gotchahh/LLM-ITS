@@ -1,8 +1,8 @@
 """Client minimo per il server locale di LM Studio.
 
 Legge una domanda dal terminale, la invia al modello configurato in .env
-e stampa la risposta in streaming. Ogni domanda e' una richiesta indipendente.
-Uscita con "esci" o Ctrl+C.
+e stampa la risposta in streaming. La conversazione resta in memoria
+finche' il client e' aperto. Uscita con "esci" o Ctrl+C.
 """
 
 import json
@@ -55,7 +55,8 @@ def invia(messages):
 
 
 # --- Ciclo delle domande --------------------------------------------------
-# Ogni domanda e' una richiesta indipendente: nessuna cronologia.
+# La cronologia vive solo in questa lista: alla chiusura si perde.
+messages = [{"role": "system", "content": SYSTEM}]
 while True:
     try:
         domanda = input("Tu> ").strip()
@@ -67,15 +68,17 @@ while True:
     if not domanda:
         continue
 
-    messages = [
-        {"role": "system", "content": SYSTEM},
-        {"role": "user", "content": domanda},
-    ]
+    messages.append({"role": "user", "content": domanda})
     try:
-        invia(messages)
+        risposta = invia(messages)
     except requests.exceptions.Timeout:
         print("Attesa scaduta: controllare server, carico e tempi.")
+        messages.pop()  # la domanda non ha avuto risposta
     except requests.exceptions.ConnectionError:
         print("Connessione fallita: controllare server, URL e porta.")
+        messages.pop()
     except requests.exceptions.HTTPError as e:
         print("Errore HTTP:", e.response.status_code, e.response.text)
+        messages.pop()
+    else:
+        messages.append({"role": "assistant", "content": risposta})
