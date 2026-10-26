@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["reale: prove con LM Studio attivo"]
+addopts = "-m 'not reale'"
