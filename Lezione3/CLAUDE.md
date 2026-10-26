@@ -9,7 +9,7 @@
 - Non aggiungere dipendenze senza motivarle e concordarle.
 - Non inserire segreti, pesi o ambiente virtuale in Git.
 - Non sono presenti test automatici in questo checkpoint.
-- Avvio dalla radice: .\venv\Scripts\python.exe client.py
+- Avvio dalla cartella Lezione3: .\venv\Scripts\python.exe client.py
 - Verifica manuale: due domande diverse, riga vuota, esci e Ctrl+C,
   server fermo e ripristinato; nome ricordato nella sessione e
   dimenticato al riavvio.

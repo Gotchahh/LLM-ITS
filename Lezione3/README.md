@@ -21,7 +21,7 @@ Client Python minimo che invia una domanda a un modello eseguito in locale con L
 
 ## Preparazione
 
-Dalla radice della repository:
+Dalla cartella `Lezione3` della repository:
 
 ```powershell
 py -m venv venv
