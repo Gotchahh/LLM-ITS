@@ -40,7 +40,8 @@ elencate nel piano e approvate prima dell'installazione. Il CLAUDE.md del proget
 3.14.7, struttura, comandi di test) quando queste convenzioni sono stabili, non per annotare l'avanzamento.
 
 ## Decisioni prese con l'utente
-- Progetto in `Lezione3/repo-lab-llm/assistente-laboratorio/` (repo personale, remote GitHub).
+- Progetto in `Esercizi/assistente-laboratorio/`, accanto a `Lezione3/`: la radice della repo personale
+  (remote GitHub `LLM-ITS`) è la cartella `Esercizi/`. Spostato il 27/10/2026 senza cambiare la storia Git.
 - Python **3.14.7** in locale (`py -3.14 -m venv .venv`) e nel container (`python:3.14.7-slim`, tag
   verificato su Docker Hub). Sul PC ci sono solo 3.13 e 3.10: va installata (winget `Python.Python.3.14` 3.14.7).
 - Modello `google/gemma-4-e4b`. **Prova preliminare eseguita il 26/10/2026** (richieste dirette a LM Studio,
