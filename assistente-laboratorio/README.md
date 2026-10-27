@@ -110,12 +110,29 @@ Prova con tre righe in ingresso da pipe (due messaggi e il comando `/esci`):
 ```
 
 Con l'ingresso da pipe il testo dell'utente non viene riscritto: dopo ogni `Tu> ` compare direttamente
-l'output successivo, per esempio i log `[INFO] nodo_llm: chiamata al modello (2 messaggi)` e
-`[INFO] nodo_llm: risposta ricevuta in ... s` (su stderr, con `LOG_LEVEL=INFO`) e poi la risposta
-`Assistente> ...`; con `LOG_LEVEL=WARNING` resta solo `Tu> Assistente> ...`. La seconda risposta usa la
-cronologia: a ogni chiamata la richiesta cresce (2 messaggi, poi 4, ...). Se `$OutputEncoding` di
-PowerShell è UTF-8 con BOM (così era nell'ambiente di prova), la pipe antepone un BOM alla prima riga: una
-prima riga `/esci` non verrebbe riconosciuta come comando, per questo l'esempio inizia con un messaggio.
+l'output successivo. Con `LOG_LEVEL=INFO` i log di `nodo_llm` (su stderr) precedono ogni risposta:
+
+```text
+Tu> [INFO] nodo_llm: chiamata al modello (2 messaggi)
+[INFO] nodo_llm: risposta ricevuta in ... s
+Assistente> ...
+Tu> [INFO] nodo_llm: chiamata al modello (4 messaggi)
+[INFO] nodo_llm: risposta ricevuta in ... s
+Assistente> ...
+Tu> Alla prossima!
+```
+
+La seconda chiamata riceve 4 messaggi (sistema, domanda, risposta, nuova domanda): è la cronologia della
+sessione. L'ultimo `Tu> ` è quello a cui risponde `/esci`, seguito da `Alla prossima!`. Con
+`LOG_LEVEL=WARNING` restano solo i dialoghi: `Tu> Assistente> ...`.
+
+Una riga vuota o di soli spazi viene ignorata senza interrogare il modello:
+
+```powershell
+"   `n/esci" | .\.venv\Scripts\python.exe -m assistente
+```
+
+stampa `Tu> Tu> Alla prossima!`.
 
 ## Diagnosi
 

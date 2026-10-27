@@ -21,7 +21,8 @@ def esegui_chat(grafo, server: str, leggi=input, scrivi=print) -> None:
     cronologia = []
     try:
         while True:
-            riga = leggi("Tu> ").strip()
+            # La pipe di PowerShell può anteporre un BOM (U+FEFF), che strip() non considera spazio.
+            riga = leggi("Tu> ").removeprefix("\ufeff").strip()
             if not riga:
                 continue
             if riga.startswith("/"):

@@ -13,6 +13,18 @@ def test_righe_vuote_e_spazi_ignorati():                              # Review F
     assert finto.chiamate == [] and uscita[-1] == "Alla prossima!"
 
 
+def test_bom_iniziale_dell_input_da_pipe_non_rompe_riga_vuota_e_comando():
+    finto = ModelloFinto([])
+    uscita = chat(costruisci_grafo(finto, []), ["\ufeff   ", "\ufeff/esci"])
+    assert finto.chiamate == [] and uscita == ["Alla prossima!"]
+
+
+def test_bom_iniziale_non_arriva_al_modello():
+    finto = ModelloFinto([AIMessage("Ciao!")])
+    chat(costruisci_grafo(finto, []), ["\ufeffciao", "/esci"])
+    assert finto.chiamate[0][1].type == "human" and finto.chiamate[0][1].content == "ciao"
+
+
 def test_comandi_normalizzati_e_sconosciuti():
     finto = ModelloFinto([])
     uscita = chat(costruisci_grafo(finto, []), ["/aiuto", "  /ESCI  "])
