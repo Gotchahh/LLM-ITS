@@ -1,6 +1,7 @@
 import logging
 
 import pytest
+from conftest import VALIDO
 
 from assistente.config import (
     ErroreConfigurazione,
@@ -8,9 +9,6 @@ from assistente.config import (
     configura_log,
     leggi_file_env,
 )
-
-VALIDO = {"LMSTUDIO_BASE_URL": "http://localhost:1234/v1", "LMSTUDIO_MODEL": "google/gemma-4-e4b",
-          "APP_TIMEZONE": "Europe/Rome"}
 
 
 @pytest.fixture
@@ -71,7 +69,7 @@ def test_livello_log_non_valido():
 
 def test_file_env_con_bom_e_crlf(tmp_path):
     f = tmp_path / ".env"
-    f.write_bytes("﻿LMSTUDIO_MODEL=google/gemma-4-e4b\r\nAPP_TIMEZONE=Europe/Rome\r\n".encode("utf-8"))
+    f.write_bytes("\ufeffLMSTUDIO_MODEL=google/gemma-4-e4b\r\nAPP_TIMEZONE=Europe/Rome\r\n".encode("utf-8"))
     assert leggi_file_env(f) == {"LMSTUDIO_MODEL": "google/gemma-4-e4b", "APP_TIMEZONE": "Europe/Rome"}
 
 
@@ -86,5 +84,6 @@ def test_log_esterni_restano_a_warning(log_isolati):
 
 
 def test_modalita_silenziosa(log_isolati):
+    configura_log("INFO")
     configura_log("WARNING")
     assert not logging.getLogger("assistente.grafo").isEnabledFor(logging.INFO)
