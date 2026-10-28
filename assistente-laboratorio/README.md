@@ -264,7 +264,7 @@ docker compose build
 docker compose run --rm assistente python -c "import assistente, langgraph; print('ok')"
 ```
 
-La seconda riga stampa `ok`. Il primo `build` scarica le dipendenze (l'installazione è durata circa 30 secondi in questa prova).
+La seconda riga stampa `ok`. Il primo `build` scarica l'immagine di base e le dipendenze e può richiedere un po' di tempo.
 
 Prova con input da pipe (`-T` disattiva il pseudo-terminale, necessario per l'ingresso da pipe), con la stessa
 domanda sull'ora della sezione «Strumento orologio»:
