@@ -41,3 +41,9 @@ def test_reale_due_domande_sull_ora(grafo):
     assert [m.name for m in primo if m.type == "tool"] == ["ora_corrente"]
     secondo = esegui_turno(grafo, primo, "E adesso che ore sono?")
     assert [m.name for m in secondo if m.type == "tool"] == ["ora_corrente", "ora_corrente"]
+
+
+def test_reale_ora_di_un_altra_citta(grafo):
+    cronologia = esegui_turno(grafo, [], "Che ore sono a New York?")
+    risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "ora_corrente"]
+    assert any(r.endswith("(America/New_York)") for r in risultati)

@@ -83,10 +83,11 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 .\.venv\Scripts\python.exe -m pytest -m reale -v
 ```
 
-Sono tre prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
-precedente e due domande sull'ora nella stessa sessione (due richieste di `ora_corrente`, una per turno).
+Sono quattro prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
+precedente, due domande sull'ora nella stessa sessione (due richieste di `ora_corrente`, una per turno) e l'ora
+di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`).
 Con un modello locale possono richiedere alcuni minuti (la prima chiamata carica il modello; con
-`google/gemma-4-e4b` le tre prove sono durate circa 4 minuti e mezzo).
+`google/gemma-4-e4b` le quattro prove sono durate circa 3 minuti e 45 secondi).
 
 ## Avvio
 
@@ -138,19 +139,23 @@ stampa `Tu> Tu> Alla prossima!`.
 
 ## Strumento orologio
 
-Per le domande su ora, data o giorno attuali il modello chiede lo strumento `ora_corrente`, senza argomenti, e
-il programma lo esegue nel fuso `APP_TIMEZONE`. Prova con tre domande (la terza chiede l'ora di un'altra città):
+Per le domande su ora, data o giorno attuali il modello chiede lo strumento `ora_corrente` e il programma lo
+esegue. Senza argomenti lo strumento dà l'ora del fuso `APP_TIMEZONE`; con l'argomento facoltativo `fuso` (un nome
+IANA, per esempio `America/New_York`) dà l'ora di un'altra località, calcolata dal programma e non dal modello.
+Un fuso non valido (per esempio `New York`) non interrompe il turno: lo strumento restituisce un testo d'errore
+con un esempio di nome corretto, che il modello può leggere e correggere. Prova con tre domande (la terza chiede
+l'ora di un'altra città):
 
 ```powershell
-"Che ore sono?`nChe giorno della settimana è oggi?`nChe ore sono a Tokyo?`n/esci" | .\.venv\Scripts\python.exe -m assistente
+"Che ore sono?`nChe giorno della settimana è oggi?`nChe ore sono a New York?`n/esci" | .\.venv\Scripts\python.exe -m assistente
 ```
 
 Con `LOG_LEVEL=INFO` la chiamata allo strumento si riconosce nei log, su stderr, da queste due righe, che
-precedono la risposta finale:
+precedono la risposta finale (qui per la prima domanda):
 
 ```text
 [INFO] instradamento: richiesta strumento ora_corrente {}
-[INFO] nodo_strumenti: ora_corrente -> mercoledì 2026-10-28T09:41:03+01:00 (Europe/Rome)
+[INFO] nodo_strumenti: ora_corrente -> mercoledì 2026-10-28T10:44:58+01:00 (Europe/Rome)
 ```
 
 La prima è la richiesta strutturata del modello (nome e argomenti), la seconda il risultato dell'esecuzione,
@@ -158,26 +163,28 @@ che viene restituito al modello: segue una nuova `nodo_llm: chiamata al modello`
 (la richiesta e il risultato) e infine `instradamento: nessuno strumento -> fine`. Una risposta sull'ora senza
 queste due righe non proviene dallo strumento.
 
-Per l'ora di un'altra città il modello chiama l'orologio e converte da sé: la risposta riporta anche l'ora
-locale di partenza, così il calcolo si controlla a mano. La conversione può essere sbagliata: nella prova del
-28/10/2026 una volta il modello ha risposto 16:42 a Tokyo partendo dalle 09:42 di Roma, mentre il valore
-corretto era 17:42 (Tokyo è UTC+9, Roma in quel giorno UTC+1); un'altra esecuzione con la stessa domanda ha
-dato 17:45 da 09:45.
+Per l'ora di un'altra città la richiesta contiene il fuso e il risultato porta l'offset di quella località
+(qui `-04:00`, per la terza domanda):
+
+```text
+[INFO] instradamento: richiesta strumento ora_corrente {"fuso": "America/New_York"}
+[INFO] nodo_strumenti: ora_corrente -> mercoledì 2026-10-28T05:45:49-04:00 (America/New_York)
+```
 
 Modalità silenziosa, con la variabile impostata solo per la sessione di PowerShell corrente:
 
 ```powershell
 $env:LOG_LEVEL = "WARNING"
-"Che ore sono?`nChe giorno della settimana è oggi?`nChe ore sono a Tokyo?`n/esci" | .\.venv\Scripts\python.exe -m assistente
+"Che ore sono?`nChe giorno della settimana è oggi?`nChe ore sono a New York?`n/esci" | .\.venv\Scripts\python.exe -m assistente
 Remove-Item Env:LOG_LEVEL
 ```
 
 Restano solo i dialoghi, senza righe `[INFO]`:
 
 ```text
-Tu> Assistente> Sono le 09:44 del giorno mercoledì 28 ottobre 2026, ora di Roma.
+Tu> Assistente> Sono le 10:46 di mercoledì 28 ottobre 2026, ora di Roma (CET).
 Tu> Assistente> Oggi è mercoledì.
-Tu> Assistente> Attualmente sono le 09:45 a Roma (ora di partenza). A Tokyo, ora sono le **17:45** di mercoledì 28 ottobre 2026.
+Tu> Assistente> A New York sono le 05:47 di mercoledì 28 ottobre 2026 (ora EDT).
 Tu> Alla prossima!
 ```
 

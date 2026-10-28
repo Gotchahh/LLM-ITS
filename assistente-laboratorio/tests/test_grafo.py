@@ -127,6 +127,15 @@ def test_percorso_con_strumento(caplog):
     assert "nodo_strumenti: ora_corrente -> lunedì 2026-10-26T16:42:10+01:00 (Europe/Rome)" in caplog.messages
 
 
+def test_richiesta_con_fuso_arriva_allo_strumento(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([chiamata("c1", {"fuso": "America/New_York"}), AIMessage("ok")])
+    nuova = esegui_turno(costruisci_grafo(finto, [orologio]), [], "Che ore sono a New York?")
+    assert nuova[2].content == "lunedì 2026-10-26T11:42:10-04:00 (America/New_York)"
+    assert 'instradamento: richiesta strumento ora_corrente {"fuso": "America/New_York"}' in caplog.messages
+    assert [r for r in caplog.records if r.levelname == "WARNING"] == []
+
+
 def test_argomenti_inattesi_ignorati(caplog):
     finto = ModelloFinto([chiamata("c1", {"timezone": "Asia/Tokyo"}), AIMessage("ok")])
     nuova = esegui_turno(costruisci_grafo(finto, [orologio]), [], "Ora a Tokyo?")

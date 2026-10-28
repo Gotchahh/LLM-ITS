@@ -20,8 +20,8 @@ PROMPT_DI_SISTEMA = (
     "Per l'ora, la data o il giorno attuali chiama sempre lo strumento ora_corrente, "
     "anche se nella conversazione c'è già un risultato precedente: quel risultato è superato. "
     "Non dedurre informazioni temporali che il risultato non contiene. "
-    "Per l'ora di un'altra città chiama ora_corrente, converti dall'ora locale e indica "
-    "nella risposta anche l'ora locale da cui sei partito."
+    "Per l'ora di un'altra città chiama ora_corrente con il fuso IANA di quella città "
+    "(per esempio America/New_York) e usa il risultato così com'è, senza convertire da te."
 )
 
 
