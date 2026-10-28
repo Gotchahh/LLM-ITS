@@ -10,6 +10,7 @@ I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assiste
 ## Requisiti
 
 - Python 3.14.7 (avviabile con `py -3.14`)
+- Docker Desktop, solo per l'avvio con Docker Compose (vedi «Avvio con Docker Compose»)
 
 ## Installazione
 
@@ -241,6 +242,87 @@ messaggi (sistema, quattro per ciascuno dei due turni con lo strumento, nuova do
 sono entrati nella cronologia. In questa prova la scritta `Ragionando...` non compare mai: si vede solo nella
 chat da tastiera, e solo con i log nascosti.
 
+## Avvio con Docker Compose
+
+L'applicazione si avvia anche in un container. LM Studio **non** è containerizzato: resta sul computer host, con il
+server avviato e il modello caricato come per l'avvio locale. Servono Docker Desktop avviato (`docker info` deve
+rispondere) e un `.env` compilato come in «Configurazione».
+
+- `Dockerfile`: immagine `python:3.14.7-slim`, dipendenze installate da `requirements.txt` prima della copia del
+  codice (cache dei layer), copia di `assistente/`, avvio con `python -m assistente`. `requirements-dev.txt` e i
+  test restano fuori dall'immagine.
+- `compose.yaml`: servizio `assistente` con le variabili di `.env`, ma con `LMSTUDIO_BASE_URL` impostata a
+  `http://host.docker.internal:1234/v1` (nel container `localhost` è il container stesso, non il computer host),
+  `stdin_open` e `tty` per la chat da tastiera, `host.docker.internal` mappato sull'host; nessuna porta pubblicata.
+- `.dockerignore`: `.env`, `.venv`, cache, `.git`, `tests`, `docs` non entrano nell'immagine. Il `.env` arriva al
+  container come variabili d'ambiente, non come file: in `/app` ci sono solo `assistente/` e `requirements.txt`.
+
+Costruzione dell'immagine e controllo che le librerie si importino:
+
+```powershell
+docker compose build
+docker compose run --rm assistente python -c "import assistente, langgraph; print('ok')"
+```
+
+La seconda riga stampa `ok`. Il primo `build` scarica le dipendenze (l'installazione è durata circa 30 secondi in questa prova).
+
+Prova con input da pipe (`-T` disattiva il pseudo-terminale, necessario per l'ingresso da pipe), con la stessa
+domanda sull'ora della sezione «Strumento orologio»:
+
+```powershell
+"Che ore sono?`n/esci" | docker compose run --rm -T assistente
+```
+
+```text
+Tu> [INFO] nodo_llm: chiamata al modello (2 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 16.0 s
+[INFO] instradamento: richiesta strumento ora_corrente {}
+[INFO] nodo_strumenti: ora_corrente -> mercoledì 2026-10-28T12:02:30+01:00 (Europe/Rome)
+[INFO] nodo_llm: chiamata al modello (4 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 26.2 s
+[INFO] instradamento: nessuno strumento -> fine
+Assistente> Sono le 12:02 e 30 secondi di mercoledì 28 ottobre 2026, secondo l'ora di Roma (CET).
+Tu> Alla prossima!
+```
+
+Il container ha raggiunto LM Studio sull'host e la richiesta di `ora_corrente` e la sua esecuzione compaiono
+nei log come in locale. Con l'input da pipe la scritta `Ragionando...` non compare.
+
+Chat interattiva: si avvia con `run`, non con `up` (vedi «Diagnosi»).
+
+```powershell
+docker compose run --rm --name assistente-demo assistente
+```
+
+Da un secondo terminale si seguono i log del container e si controlla che sia in esecuzione:
+
+```powershell
+docker logs -f assistente-demo
+docker ps
+```
+
+`--name assistente-demo` dà al container un nome fisso, così `docker logs -f assistente-demo` non richiede di
+cercare l'identificativo. `--rm` rimuove il container all'uscita; la rete creata da Compose si toglie con
+`docker compose down`. I comandi della chat sono quelli dell'avvio locale (`/esci`, `/log`).
+
+Nella demo interattiva questi tre comandi, `/log` con la scritta `Ragionando...` e Ctrl+C durante l'attesa sono
+stati provati a mano e hanno funzionato.
+
+Confronto tra l'orologio dell'host e quello della macchina virtuale di Docker (l'ora dello strumento parte dal
+sistema in cui gira il programma):
+
+```powershell
+Get-Date
+docker run --rm python:3.14.7-slim date
+```
+
+```text
+mercoledì 28 ottobre 2026 12:03:02
+Wed Oct 28 11:03:06 UTC 2026
+```
+
+Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due ore coincidono.
+
 ## Diagnosi
 
 - **Il server non è disponibile**: l'avvio termina con
@@ -261,3 +343,51 @@ chat da tastiera, e solo con i log nascosti.
 - **Risposta vuota o non valida**: se il modello risponde senza testo (o con una richiesta di strumento
   malformata) compare `Errore: il modello non ha prodotto una risposta valida. Turno annullato.` e nel log un
   avviso `[WARNING]`.
+
+Con Docker Compose (sintomo, primo controllo):
+
+- **Il container termina subito**: leggere l'output del terminale (un errore di avvio dell'applicazione chiude il
+  container con codice 1), poi controllare il comando di avvio e l'input interattivo. `docker compose run` collega
+  la tastiera; `docker compose up` no. Provato con `docker compose up -d`: il container risulta `Up` ma resta
+  in attesa di un input che nessuno può digitare e `docker logs` è vuoto. Si ferma e si rimuove con
+  `docker compose down`.
+- **Nessuna connessione al modello**: controllare in ordine il server di LM Studio (avviato, modello caricato),
+  l'URL configurato e la raggiungibilità. Nel container `localhost` è il container stesso: con
+  `LMSTUDIO_BASE_URL=http://localhost:1234/v1` l'avvio termina subito con codice 1.
+
+  ```powershell
+  "/esci" | docker compose run --rm -T -e LMSTUDIO_BASE_URL=http://localhost:1234/v1 assistente
+  ```
+
+  ```text
+  Errore: Impossibile leggere l'elenco dei modelli da http://localhost:1234/v1/models: [Errno 111] Connection refused. Avviare il server locale in LM Studio e controllare LMSTUDIO_BASE_URL.
+  ```
+
+  Compose usa invece `http://host.docker.internal:1234/v1`, che dal container arriva all'host. Su questo PC,
+  con Docker Desktop, LM Studio ascoltava soltanto su `127.0.0.1` e il container lo ha raggiunto lo stesso:
+
+  ```powershell
+  Get-NetTCPConnection -LocalPort 1234 -State Listen | Select-Object LocalAddress, LocalPort, State
+  ```
+
+  ```text
+  LocalAddress LocalPort  State
+  ------------ ---------  -----
+  127.0.0.1         1234 Listen
+  ```
+
+  Se in un'altra configurazione la connessione dal container viene rifiutata, i controlli da fare (non
+  necessari qui, quindi non provati) sono l'indirizzo di ascolto di LM Studio, cioè l'opzione «Serve on Local
+  Network», e il firewall di Windows.
+- **Risposta sull'ora senza uso dell'orologio**: cercare nei log del container le richieste di strumento
+  (`instradamento: richiesta strumento ora_corrente ...`) e il percorso seguito (`nodo_strumenti`, poi
+  `instradamento: nessuno strumento -> fine`). Un'ora senza queste righe non proviene dallo strumento. Con i log
+  nascosti (`/log`) o con `LOG_LEVEL=WARNING` le righe non compaiono.
+- **Il container è già scomparso e non si può ispezionare**: `--rm` lo rimuove all'uscita. Per esaminare un
+  arresto dopo la chiusura, ripetere il comando senza `--rm` e guardare `docker ps -a` e `docker logs`. Un
+  container in esecuzione non dimostra che funzionino tutti i componenti: bisogna vedere la risposta del modello
+  e, per l'orologio, le righe di `ora_corrente`.
+- **L'ora risulta sbagliata di colpo**: l'orologio della macchina virtuale di Docker Desktop può restare indietro
+  dopo la sospensione del PC (problema noto con WSL2; non riprodotto qui). Confrontare l'ora dell'host con quella
+  del container come in «Avvio con Docker Compose»: se differiscono, l'errore viene dall'orologio della macchina
+  virtuale e non dall'applicazione (primo tentativo: riavviare Docker Desktop, non provato qui).
