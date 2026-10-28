@@ -3,6 +3,8 @@
 > Stato: approvata dall'utente il 26/10/2026, al termine del brainstorming con Superpowers.
 > Aggiornata il 28/10/2026 con la proposta approvata dall'utente: fuso facoltativo nello strumento orologio
 > e scritta «Ragionando...» durante l'attesa in modalità silenziosa.
+> Aggiornata di nuovo il 28/10/2026, su richiesta dell'utente: comando `/log` in chat per mostrare o
+> nascondere i log senza riavviare.
 
 ## Intento e perché
 Applicazione Python da terminale che conversa con un modello locale servito da LM Studio, con il flusso
@@ -21,8 +23,8 @@ strumenti, MCP, workflow e RAG: deve essere piccola ma estendibile senza riscrit
 
 ## Non-obiettivi
 MCP, RAG, workflow, interfacce web/grafiche, altri strumenti, persistenza della cronologia, servizi cloud,
-containerizzazione di LM Studio, streaming delle risposte, comandi in chat per cambiare i log o per
-svuotare la cronologia (per ripartire da zero si esce con `/esci` e si riavvia),
+containerizzazione di LM Studio, streaming delle risposte, comandi in chat per svuotare la cronologia
+(per ripartire da zero si esce con `/esci` e si riavvia),
 gestione del limite di contesto (la cronologia cresce senza tagli per tutta la sessione), correzione
 automatica delle risposte del modello.
 
@@ -54,8 +56,10 @@ elencate nel piano e approvate prima dell'installazione. Il CLAUDE.md del proget
   variabile d'ambiente, validato all'avvio; con il parametro calcola l'ora di un'altra località.
   Decisione del 28/10/2026: sostituisce l'orologio senza parametri, dopo che il modello ha indicato le 4:00 a
   New York quando erano le 5:00 (in quella settimana Roma e New York distano 5 ore invece di 6).
-- Log dei passaggi: due modalità tramite `LOG_LEVEL` — `INFO` (default, passaggi visibili) e `WARNING`
-  (solo dialogo). Nessun comando in chat per cambiarle. In modalità silenziosa, solo nella chat interattiva,
+- Log dei passaggi: due modalità, log visibili e log nascosti (solo dialogo). La modalità iniziale viene da
+  `LOG_LEVEL`: `INFO` (default, passaggi visibili) o `WARNING` (solo dialogo). In chat il comando `/log`
+  passa dall'una all'altra, solo per la sessione in corso. Decisione del 28/10/2026, che sostituisce la
+  scelta del 26/10 di cambiare modalità solo all'avvio. Con i log nascosti, solo nella chat interattiva,
   durante l'attesa compare la scritta fissa «Ragionando...», cancellata all'arrivo della risposta
   (decisione del 28/10/2026).
 - Risposta mostrata tutta insieme (niente streaming).
@@ -78,11 +82,11 @@ Pacchetto `assistente/` nella radice del progetto, avviato con `python -m assist
 
 | Modulo | Responsabilità |
 |---|---|
-| `config.py` | Legge e valida le variabili d'ambiente (carica `.env` se presente, senza sovrascrivere variabili già impostate); errore chiaro se mancano URL o modello o se il fuso non è valido |
+| `config.py` | Legge e valida le variabili d'ambiente (carica `.env` se presente, senza sovrascrivere variabili già impostate); errore chiaro se mancano URL o modello o se il fuso non è valido; configura i log e ne cambia la modalità (visibili o nascosti) |
 | `strumenti.py` | Strumento `ora_corrente` con parametro facoltativo `fuso`, costruito con fuso configurato e sorgente dell'istante iniettabili |
 | `modello.py` | Crea il `ChatOpenAI` puntato a LM Studio dalla configurazione (temperatura 0); controllo all'avvio dell'elenco modelli con la libreria standard (`urllib`), separando la lettura HTTP dalla verifica dell'elenco così che la verifica sia testabile senza rete |
 | `grafo.py` | Stato, nodi, instradamento; `costruisci_grafo(modello, strumenti)` riceve il modello dall'esterno |
-| `cli.py` / `__main__.py` | Ciclo di chat, cronologia di sessione, stampa, gestione errori, configurazione dei log, scritta di attesa in modalità silenziosa |
+| `cli.py` / `__main__.py` | Ciclo di chat, cronologia di sessione, stampa, gestione errori, comandi `/esci` e `/log`, scritta di attesa con i log nascosti |
 
 ### Grafo
 - **Stato**: `messages: Annotated[list, add_messages]` (aggiunge, non sostituisce).
@@ -125,7 +129,7 @@ possono influenzare i turni successivi: si limitano alla fonte (risultato comple
 | `LMSTUDIO_BASE_URL` | `http://localhost:1234/v1` | Compose la sovrascrive con `http://host.docker.internal:1234/v1` |
 | `LMSTUDIO_MODEL` | `google/gemma-4-e4b` | Obbligatoria; deve coincidere con `GET /v1/models` |
 | `APP_TIMEZONE` | `Europe/Rome` | Obbligatoria; nel container non si deduce dall'host |
-| `LOG_LEVEL` | `INFO` | `INFO` = passaggi visibili; `WARNING` = solo dialogo, con «Ragionando...» durante l'attesa nella chat interattiva |
+| `LOG_LEVEL` | `INFO` | Modalità iniziale dei log: `INFO` = passaggi visibili; `WARNING` = solo dialogo, con «Ragionando...» durante l'attesa nella chat interattiva. In chat `/log` la cambia |
 La chiave API non serve a LM Studio: si passa un segnaposto fisso nel codice, nessuna credenziale.
 
 ### Terminale
@@ -135,11 +139,22 @@ con `docker logs -f`). Errori stampati dalla CLI, quindi visibili in entrambe le
 Errori di connessione/timeout verso LM Studio o modello non trovato: messaggio riconoscibile con l'URL
 usato, nessuna risposta inventata, turno scartato, chat che continua.
 
-Scritta di attesa: quando `LOG_LEVEL` nasconde gli `INFO` (`WARNING` o `ERROR`) e sia l'ingresso sia l'uscita
-sono un terminale, la CLI scrive `Ragionando...` su stdout, senza andare a capo, subito prima di ogni turno
-inviato al modello, e la cancella esattamente (backspace, spazi, backspace) prima di stampare la risposta,
-l'errore o il saluto, anche dopo Ctrl+C. Righe vuote e comandi non la mostrano. Con l'input da pipe (test,
-esempi del README, `docker compose run -T`) o in modalità `INFO` l'output resta quello di sempre.
+Comando `/log`: alterna log visibili e log nascosti per la sessione in corso, senza interrogare il modello e
+senza entrare nella cronologia; è normalizzato come `/esci` (`/LOG`, ` /log `), mentre `/log on` o
+`/log off` sono comandi sconosciuti. Dopo il cambio la CLI stampa su stdout
+`Log nascosti: solo dialogo. Scrivi /log per mostrarli.` oppure `Log visibili. Scrivi /log per nasconderli.`
+Il cambio tocca solo i log dell'applicazione (quelli delle librerie esterne restano a WARNING) e riporta al
+livello d'avvio quando si torna alla modalità iniziale: da `DEBUG` o `INFO` i log si nascondono con `WARNING`
+e si rimostrano con il livello d'avvio; da `WARNING` o `ERROR` si mostrano con `INFO` e si rinascondono con il
+livello d'avvio. Il comando sconosciuto elenca `Comandi disponibili: /esci, /log`. Alla sessione successiva
+si riparte da `LOG_LEVEL`: il `.env` non viene modificato.
+
+Scritta di attesa: quando i log sono nascosti (da `LOG_LEVEL` all'avvio o dopo `/log`) e sia l'ingresso sia
+l'uscita sono un terminale, la CLI scrive `Ragionando...` su stdout, senza andare a capo, subito prima di ogni
+turno inviato al modello, e la cancella esattamente (backspace, spazi, backspace) prima di stampare la
+risposta, l'errore o il saluto, anche dopo Ctrl+C. Righe vuote e comandi non la mostrano. La scelta si fa a
+ogni turno, quindi segue i cambi fatti con `/log`. Con l'input da pipe (test, esempi del README,
+`docker compose run -T`) o con i log visibili l'output resta quello di sempre.
 
 Esempio in modalità `INFO`:
 ```
@@ -176,11 +191,14 @@ Ogni caso ha un comportamento definito e, dove indicato, un test automatico.
 | Strumento richiesto con argomenti inattesi (es. `{"timezone": ...}`) | Argomenti ignorati e registrati a WARNING; lo strumento restituisce comunque l'ora del fuso configurato; nessun crash | sì |
 | Strumento richiesto con `fuso` assente, nullo o vuoto | Ora del fuso configurato | sì |
 | Strumento richiesto con un `fuso` non valido (`New York`, un numero) | Nessuna eccezione: il risultato è il testo d'errore del contratto, il modello può riprovare | sì |
-| Modalità silenziosa con input da pipe o uscita non da terminale | Nessuna scritta di attesa: output identico a quello senza scritta | sì (scelta dell'indicatore) |
+| Log nascosti con input da pipe o uscita non da terminale | Nessuna scritta di attesa: output identico a quello senza scritta | sì (scelta dell'indicatore) |
+| `/log` scritto in modo diverso (`/LOG`, ` /log `) o con altro testo (`/log on`) | Normalizzato come `/esci`; `/log on` è un comando sconosciuto; in nessun caso si interroga il modello | sì |
+| `/log` partendo da `DEBUG` o da `ERROR` | Tornando alla modalità iniziale si ritrova il livello d'avvio (`DEBUG` o `ERROR`); l'altra modalità usa `WARNING` o `INFO` | sì |
+| `/log` con l'input da pipe (anche `docker compose run -T`) | I log cambiano come da tastiera; la scritta di attesa non compare | sì (cambio dei log) + prova da pipe |
 | Errore del modello o Ctrl+C mentre la scritta di attesa è visibile | Scritta cancellata prima del messaggio d'errore o del saluto | sì |
 | Più richieste di strumento nella stessa risposta | Tutte eseguite, ciascuna con il proprio `tool_call_id` | sì |
 | Contesto del modello esaurito (sessione lunga) | Errore restituito da LM Studio mostrato come errore riconoscibile, turno scartato; README spiega come aumentare la lunghezza di contesto in LM Studio e che la sua politica di overflow può tagliare messaggi in silenzio | — |
-| Log di librerie esterne (httpx, openai) | Solo i logger dell'applicazione seguono `LOG_LEVEL`; quelli esterni restano a WARNING, così la modalità INFO mostra solo i passaggi del grafo | sì |
+| Log di librerie esterne (httpx, openai) | Solo i logger dell'applicazione seguono `LOG_LEVEL` e `/log`; quelli esterni restano a WARNING, così la modalità INFO mostra solo i passaggi del grafo | sì |
 | `.env` salvato con BOM (PowerShell 5.1) o con fine riga Windows | Lettura con codifica `utf-8-sig`; il README crea il file con `Copy-Item .env.example .env` | sì |
 | Variabile presente ma vuota (`LMSTUDIO_MODEL=`) o URL senza `http://`/`https://` | Trattata come mancante / non valida: errore chiaro all'avvio | sì |
 | Test eseguiti sul PC dello sviluppatore con un `.env` reale | `load_dotenv` chiamato solo all'avvio dell'app, non all'import: i test passano la configurazione in modo esplicito e non dipendono dal `.env`, dall'orologio reale o dalla rete | sì |
@@ -192,7 +210,7 @@ Ogni caso ha un comportamento definito e, dove indicato, un test automatico.
 **Limiti accettati (non coperti):** il modello può scrivere nel testo qualcosa che imita una richiesta di
 strumento invece di una richiesta strutturata (lo rilevano le prove reali, non si interpreta il testo); un
 incolla su più righe produce più turni; il contenuto delle risposte può essere sbagliato anche quando il
-flusso è corretto; in modalità silenziosa un raro avviso (WARNING) stampato durante l'attesa può lasciare
+flusso è corretto; con i log nascosti un raro avviso (WARNING) stampato durante l'attesa può lasciare
 «Ragionando...» a schermo accanto all'avviso (difetto solo estetico).
 
 ## Test
@@ -206,11 +224,14 @@ flusso è corretto; in modalità silenziosa un raro avviso (WARNING) stampato du
   modello che chiede sempre lo strumento → limite di passaggi; richiesta con `{"fuso": ...}` che arriva allo
   strumento senza avvisi;
 - scritta di attesa: ordine mostra → nascondi → risposta (anche con errore e Ctrl+C), nessuna scritta per
-  righe vuote e comandi, testo scritto e cancellato esattamente, scelta dell'indicatore secondo livello di
-  log e terminale;
+  righe vuote e comandi, testo scritto e cancellato esattamente, scelta dell'indicatore secondo il
+  terminale, scritta mostrata solo con i log nascosti, anche dopo un cambio con `/log`;
+- comando `/log`: messaggi di conferma, normalizzazione, nessuna chiamata al modello, livello del logger
+  dell'applicazione dopo uno e due cambi partendo da ciascuno dei quattro livelli;
 - cronologia: due turni → domande e risposte nell'ordine giusto, senza duplicati; errore del modello →
   cronologia invariata;
-- log: richiesta e risultato dello strumento presenti a `INFO`, assenti a `WARNING` (`caplog`).
+- log: richiesta e risultato dello strumento presenti a `INFO`, assenti a `WARNING` (`caplog`); nella stessa
+  chat, i log dei passaggi spariscono dopo `/log` e ricompaiono dopo un secondo `/log`.
 
 **Reali (attivati esplicitamente, esclusi di default)** — marcatore pytest `reale`, eseguiti con
 `python -m pytest -m reale` con LM Studio attivo: una domanda ordinaria riceve risposta senza strumento;
@@ -219,12 +240,14 @@ sessione produce una seconda chiamata; «Che ore sono a New York?» produce un `
 calcolato nel fuso `America/New_York`. Se il modello non chiama lo strumento il test fallisce e lo si
 riporta: non si sostituisce con risposte simulate. La prova Docker è una checklist manuale nel README
 (build, run, conversazione a due turni, due domande sull'ora, giorno della settimana corretto, una domanda
-sull'ora di un'altra città con controllo del fuso richiesto nel log, `docker logs -f`). L'aspetto della
-scritta «Ragionando...» nella chat da tastiera si verifica a mano.
+sull'ora di un'altra città con controllo del fuso richiesto nel log, `docker logs -f`, `/log`). Il comando
+`/log` con il modello vero si prova con l'input da pipe (log presenti, assenti, di nuovo presenti). L'aspetto
+della scritta «Ragionando...» nella chat da tastiera, anche dopo `/log`, si verifica a mano.
 
 ## Documentazione
 README: requisiti, configurazione (`.env` da `.env.example`, verifica del modello con
-`Invoke-RestMethod http://localhost:1234/v1/models`), le due modalità di log, avvio locale e con Compose,
+`Invoke-RestMethod http://localhost:1234/v1/models`), le due modalità di log e il comando `/log`, avvio
+locale e con Compose,
 test automatici e reali, diagnosi (sintomi della slide 17, indirizzo di ascolto di LM Studio). Solo comandi
 effettivamente eseguiti. CLAUDE.md aggiornato con struttura e comandi di test quando si stabilizzano.
 
@@ -234,6 +257,9 @@ effettivamente eseguiti. CLAUDE.md aggiornato con struttura e comandi di test qu
 - Mie anche: valori dei timeout e gestione dei casi limite della tabella sopra.
 - Mie, del 28/10/2026: `fuso` nullo trattato come assente; un `fuso` che non è un testo gestito come fuso non
   valido; la scelta dell'indicatore di attesa in una piccola funzione di `cli.py`, testabile con stream finti.
+- Mie, del 28/10/2026 (comando `/log`): un solo comando che alterna, invece di `/log on` e `/log off`; i testi
+  dei messaggi di conferma; il ritorno al livello d'avvio e `WARNING`/`INFO` per l'altra modalità; nessun
+  messaggio all'avvio che presenti `/log` (lo elencano il README e il messaggio dei comandi sconosciuti).
 - Al builder: testo del prompt di sistema (nel rispetto dei requisiti sopra), nomi interni, forma esatta
   del modello finto; versioni esatte proposte nel piano.
 

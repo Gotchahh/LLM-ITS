@@ -716,6 +716,158 @@ Remove-Item Env:LOG_LEVEL
   compare.
 - [ ] **Step 7: Commit** `feat(cli): mostra «Ragionando...» durante l'attesa in modalità silenziosa`.
 
+### Task 6C: Comando `/log` in chat
+
+Aggiunto il 28/10/2026 su richiesta dell'utente (specifica: decisioni, sezione Terminale, casi limite, test).
+Sostituisce la scelta del 26/10 di cambiare modalità di log solo all'avvio.
+
+**Files:**
+- Modify: `assistente/config.py`, `assistente/cli.py`, `assistente/__main__.py`
+- Modify: `tests/conftest.py`, `tests/test_config.py`, `tests/test_cli.py`, `README.md`
+
+**Interfaces:**
+- Consumes: `configura_log`, `LIVELLO_LOG_PREDEFINITO` (Task 2); `esegui_chat`, `IndicatoreAttesa`,
+  `crea_indicatore_attesa` (Task 6B).
+- Produces in `config.py`: `class ModalitaLog` con
+  - `__init__(self, livello_iniziale: str)` (uno di `LIVELLI_LOG`, già in maiuscolo); imposta
+    `visibili: bool` (`False` per `WARNING` ed `ERROR`, `True` per `DEBUG` e `INFO`) e **non** tocca i logger;
+  - `alterna(self) -> bool`: inverte `visibili`, imposta il livello del solo logger `assistente` e restituisce
+    il nuovo `visibili`. Livelli: con log visibili `livello_iniziale` se era `DEBUG`/`INFO`, altrimenti `INFO`;
+    con log nascosti `livello_iniziale` se era `WARNING`/`ERROR`, altrimenti `WARNING`.
+- Produces in `cli.py`:
+  - `COMANDO_LOG = "/log"`;
+  - `MESSAGGIO_LOG_VISIBILI = "Log visibili. Scrivi /log per nasconderli."`;
+  - `MESSAGGIO_LOG_NASCOSTI = "Log nascosti: solo dialogo. Scrivi /log per mostrarli."`;
+  - messaggio dei comandi sconosciuti: `Comando sconosciuto. Comandi disponibili: /esci, /log`;
+  - `crea_indicatore_attesa(ingresso, uscita) -> IndicatoreAttesa | None`: **senza più il livello di log**,
+    restituisce l'indicatore se `ingresso.isatty()` e `uscita.isatty()`, altrimenti `None`;
+  - `esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None,
+    livello_log: str = LIVELLO_LOG_PREDEFINITO)`: crea `ModalitaLog(livello_log)`. `/log`, normalizzato come
+    `/esci`, chiama `alterna()` e stampa `MESSAGGIO_LOG_VISIBILI` o `MESSAGGIO_LOG_NASCOSTI`, senza turno né
+    cronologia. A ogni turno la scritta di attesa si usa solo se `attesa is not None` **e** i log sono nascosti
+    in quel momento; il resto del turno (gestori d'errore, `finally` di `nascondi`) resta invariato.
+- Produces in `__main__.py`: `esegui_chat(grafo, config.base_url,
+  attesa=crea_indicatore_attesa(sys.stdin, sys.stdout), livello_log=config.livello_log)`.
+- Produces in `tests/conftest.py`:
+  - `chat(grafo, righe, con_attesa=False, livello_log="INFO")`, che passa `livello_log` a `esegui_chat`;
+  - una fixture `autouse` che salva il livello del logger `assistente` prima di ogni test e lo rimette dopo,
+    perché `/log` lo cambia davvero.
+
+- [ ] **Step 1: Scrivere i test che falliscono**
+
+  In `tests/test_config.py`:
+
+```python
+@pytest.mark.parametrize("iniziale, visibili, dopo_uno, dopo_due", [
+    ("DEBUG", True, "WARNING", "DEBUG"),
+    ("INFO", True, "WARNING", "INFO"),
+    ("WARNING", False, "INFO", "WARNING"),
+    ("ERROR", False, "INFO", "ERROR"),
+])
+def test_modalita_log_alterna_e_torna_al_livello_d_avvio(log_isolati, iniziale, visibili, dopo_uno, dopo_due):
+    configura_log(iniziale)
+    modalita = ModalitaLog(iniziale)
+    assert modalita.visibili is visibili
+    assert modalita.alterna() is (not visibili)
+    assert logging.getLevelName(logging.getLogger("assistente").level) == dopo_uno
+    assert modalita.alterna() is visibili
+    assert logging.getLevelName(logging.getLogger("assistente").level) == dopo_due
+
+
+def test_modalita_log_non_tocca_i_logger_alla_creazione(log_isolati):
+    configura_log("DEBUG")
+    ModalitaLog("INFO")
+    assert logging.getLogger("assistente").level == logging.DEBUG
+
+
+def test_modalita_log_tocca_solo_i_log_dell_applicazione(log_isolati):
+    configura_log("WARNING")
+    ModalitaLog("WARNING").alterna()
+    assert logging.getLogger("assistente.grafo").isEnabledFor(logging.INFO)
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
+```
+
+  In `tests/test_cli.py`:
+  - nei test esistenti il messaggio dei comandi sconosciuti diventa
+    `"Comando sconosciuto. Comandi disponibili: /esci, /log"`;
+  - i quattro test con `con_attesa=True` del Task 6B passano anche `livello_log="WARNING"`;
+  - `test_scelta_dell_indicatore` perde il livello:
+
+```python
+@pytest.mark.parametrize("ingresso, uscita, atteso", [
+    (io.StringIO(), TerminaleFinto(), False),
+    (TerminaleFinto(), io.StringIO(), False),
+    (TerminaleFinto(), TerminaleFinto(), True),
+])
+def test_scelta_dell_indicatore(ingresso, uscita, atteso):
+    assert isinstance(crea_indicatore_attesa(ingresso, uscita), IndicatoreAttesa) is atteso
+```
+
+  - nuovi test:
+
+```python
+NASCOSTI = "Log nascosti: solo dialogo. Scrivi /log per mostrarli."
+VISIBILI = "Log visibili. Scrivi /log per nasconderli."
+
+
+def test_log_alterna_con_messaggi_e_senza_chiamare_il_modello():
+    finto = ModelloFinto([])
+    uscita = chat(costruisci_grafo(finto, []), ["/log", "  /LOG  ", "/log on", "/esci"])
+    assert uscita == [NASCOSTI, VISIBILI, "Comando sconosciuto. Comandi disponibili: /esci, /log",
+                      "Alla prossima!"]
+    assert finto.chiamate == []
+
+
+def test_log_partendo_dalla_modalita_silenziosa():
+    uscita = chat(costruisci_grafo(ModelloFinto([]), []), ["/log"], livello_log="WARNING")
+    assert uscita == [VISIBILI, "Alla prossima!"]
+
+
+def test_log_nasconde_e_rimostra_i_passaggi_nella_stessa_chat(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([AIMessage("R1"), AIMessage("R2"), AIMessage("R3")])
+    chat(costruisci_grafo(finto, []), ["D1", "/log", "D2", "/log", "D3"])
+    chiamate = [r.getMessage() for r in caplog.records if r.getMessage().startswith("nodo_llm: chiamata")]
+    # D2 non lascia log; D3 riceve 6 messaggi: il comando /log non è entrato nella cronologia
+    assert chiamate == ["nodo_llm: chiamata al modello (2 messaggi)",
+                        "nodo_llm: chiamata al modello (6 messaggi)"]
+
+
+def test_attesa_compare_dopo_log_che_nasconde():
+    finto = ModelloFinto([AIMessage("R1"), AIMessage("R2")])
+    uscita = chat(costruisci_grafo(finto, []), ["D1", "/log", "D2"], con_attesa=True)
+    assert uscita == ["Assistente> R1", NASCOSTI, "[mostra]", "[nascondi]", "Assistente> R2",
+                      "Alla prossima!"]
+
+
+def test_attesa_sparisce_dopo_log_che_mostra():
+    finto = ModelloFinto([AIMessage("R1"), AIMessage("R2")])
+    uscita = chat(costruisci_grafo(finto, []), ["D1", "/log", "D2"], con_attesa=True, livello_log="WARNING")
+    assert uscita == ["[mostra]", "[nascondi]", "Assistente> R1", VISIBILI, "Assistente> R2",
+                      "Alla prossima!"]
+```
+
+- [ ] **Step 2:** pytest → FAIL (import di `ModalitaLog`). **Step 3:** implementare. **Step 4:** pytest completo
+  → PASS, nessun test `reale` eseguito.
+- [ ] **Step 5: Prova eseguita da Claude con il modello vero**, input da pipe e livello predefinito:
+
+```powershell
+"Che ore sono?`n/log`nChe ore sono a New York?`n/log`nChe giorno è oggi?`n/esci" | .\.venv\Scripts\python.exe -m assistente
+```
+
+  → primo turno con le righe `[INFO]` (richiesta `ora_corrente`); poi `Tu> Log nascosti: solo dialogo. Scrivi
+  /log per mostrarli.`; secondo turno senza righe `[INFO]`, solo `Tu> Assistente> ...`; poi `Tu> Log visibili.
+  Scrivi /log per nasconderli.`; terzo turno di nuovo con le righe `[INFO]`; da nessuna parte `Ragionando...`.
+  L'aspetto nella chat da tastiera Claude non può vederlo: va dato all'utente come prova manuale (domanda con
+  log visibili senza scritta; `/log`; domanda con «Ragionando...» che compare e sparisce; Ctrl+C durante
+  l'attesa; `/aiuto` che elenca `/esci, /log`).
+- [ ] **Step 6: README**:
+  - modalità di log: `LOG_LEVEL` sceglie quella iniziale, `/log` passa dall'una all'altra per la sessione
+    senza modificare `.env`; «Ragionando...» compare con i log nascosti, solo da tastiera;
+  - comandi della chat: `/log` e il nuovo messaggio dei comandi sconosciuti;
+  - l'esempio da pipe dello Step 5, con l'output osservato abbreviato come negli altri esempi.
+- [ ] **Step 7: Commit** `feat(cli): aggiunge il comando /log per mostrare o nascondere i log`.
+
 ### Task 7: Docker Compose
 
 **Files:**
@@ -743,7 +895,8 @@ Remove-Item Env:LOG_LEVEL
 - [ ] **Step 5: Consegna all'utente — demo interattiva**: l'utente esegue
   `docker compose run --rm --name assistente-demo assistente` (due turni, due domande sull'ora, una su un'altra
   città) e da un secondo terminale `docker logs -f assistente-demo`, e riporta l'esito. Nella stessa demo prova
-  anche la scritta «Ragionando...» con `LOG_LEVEL=WARNING` (Task 6B). Il commit aspetta l'esito.
+  anche `/log` e la scritta «Ragionando...» con i log nascosti (Task 6B e 6C), senza variabili in più.
+  Il commit aspetta l'esito.
 - [ ] **Step 6: README** — avvio con Compose, `run` invece di `up`, diagnosi (slide 17, indirizzo di ascolto,
   firewall, orologio della VM).
 - [ ] **Step 7: Commit** `feat(docker): avvia l'assistente con Docker Compose verso LM Studio sull'host`.
