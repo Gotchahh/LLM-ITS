@@ -31,7 +31,7 @@ def test_bom_iniziale_non_arriva_al_modello():
 def test_comandi_normalizzati_e_sconosciuti():
     finto = ModelloFinto([])
     uscita = chat(costruisci_grafo(finto, []), ["/aiuto", "  /ESCI  "])
-    assert "Comando sconosciuto. Comandi disponibili: /esci" in uscita and finto.chiamate == []
+    assert "Comando sconosciuto. Comandi disponibili: /esci, /log" in uscita and finto.chiamate == []
 
 
 def test_esci_termina_senza_chiamare_il_modello():
@@ -98,24 +98,27 @@ class TerminaleFinto(io.StringIO):
 
 
 def test_attesa_mostrata_e_nascosta_prima_della_risposta():
-    uscita = chat(costruisci_grafo(ModelloFinto([AIMessage("R1")]), []), ["D1", "/esci"], con_attesa=True)
+    finto = ModelloFinto([AIMessage("R1")])
+    uscita = chat(costruisci_grafo(finto, []), ["D1", "/esci"], con_attesa=True, livello_log="WARNING")
     assert uscita == ["[mostra]", "[nascondi]", "Assistente> R1", "Alla prossima!"]
 
 
 def test_attesa_nascosta_prima_dell_errore():
     finto = ModelloFinto([ConnectionError("Connection refused")])
-    uscita = chat(costruisci_grafo(finto, []), ["D1"], con_attesa=True)
+    uscita = chat(costruisci_grafo(finto, []), ["D1"], con_attesa=True, livello_log="WARNING")
     assert uscita[:2] == ["[mostra]", "[nascondi]"] and uscita[2].startswith("Errore: ")
 
 
 def test_attesa_nascosta_prima_del_saluto_dopo_ctrl_c():
-    uscita = chat(costruisci_grafo(ModelloFinto([KeyboardInterrupt()]), []), ["D1"], con_attesa=True)
+    finto = ModelloFinto([KeyboardInterrupt()])
+    uscita = chat(costruisci_grafo(finto, []), ["D1"], con_attesa=True, livello_log="WARNING")
     assert uscita == ["[mostra]", "[nascondi]", "Alla prossima!"]
 
 
 def test_righe_vuote_e_comandi_senza_attesa():
-    uscita = chat(costruisci_grafo(ModelloFinto([]), []), ["", "   ", "/aiuto", "/esci"], con_attesa=True)
-    assert uscita == ["Comando sconosciuto. Comandi disponibili: /esci", "Alla prossima!"]
+    righe = ["", "   ", "/aiuto", "/esci"]
+    uscita = chat(costruisci_grafo(ModelloFinto([]), []), righe, con_attesa=True, livello_log="WARNING")
+    assert uscita == ["Comando sconosciuto. Comandi disponibili: /esci, /log", "Alla prossima!"]
 
 
 def test_indicatore_scrive_e_cancella_esattamente():
@@ -134,13 +137,51 @@ def test_indicatore_non_mostrato_non_cancella_nulla():
     assert uscita.getvalue() == ""
 
 
-@pytest.mark.parametrize("livello, ingresso, uscita, atteso", [
-    ("INFO", TerminaleFinto(), TerminaleFinto(), False),
-    ("DEBUG", TerminaleFinto(), TerminaleFinto(), False),
-    ("WARNING", io.StringIO(), TerminaleFinto(), False),
-    ("WARNING", TerminaleFinto(), io.StringIO(), False),
-    ("WARNING", TerminaleFinto(), TerminaleFinto(), True),
-    ("ERROR", TerminaleFinto(), TerminaleFinto(), True),
+@pytest.mark.parametrize("ingresso, uscita, atteso", [
+    (io.StringIO(), TerminaleFinto(), False),
+    (TerminaleFinto(), io.StringIO(), False),
+    (TerminaleFinto(), TerminaleFinto(), True),
 ])
-def test_scelta_dell_indicatore(livello, ingresso, uscita, atteso):
-    assert isinstance(crea_indicatore_attesa(livello, ingresso, uscita), IndicatoreAttesa) is atteso
+def test_scelta_dell_indicatore(ingresso, uscita, atteso):
+    assert isinstance(crea_indicatore_attesa(ingresso, uscita), IndicatoreAttesa) is atteso
+
+
+NASCOSTI = "Log nascosti: solo dialogo. Scrivi /log per mostrarli."
+VISIBILI = "Log visibili. Scrivi /log per nasconderli."
+
+
+def test_log_alterna_con_messaggi_e_senza_chiamare_il_modello():
+    finto = ModelloFinto([])
+    uscita = chat(costruisci_grafo(finto, []), ["/log", "  /LOG  ", "/log on", "/esci"])
+    assert uscita == [NASCOSTI, VISIBILI, "Comando sconosciuto. Comandi disponibili: /esci, /log",
+                      "Alla prossima!"]
+    assert finto.chiamate == []
+
+
+def test_log_partendo_dalla_modalita_silenziosa():
+    uscita = chat(costruisci_grafo(ModelloFinto([]), []), ["/log"], livello_log="WARNING")
+    assert uscita == [VISIBILI, "Alla prossima!"]
+
+
+def test_log_nasconde_e_rimostra_i_passaggi_nella_stessa_chat(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([AIMessage("R1"), AIMessage("R2"), AIMessage("R3")])
+    chat(costruisci_grafo(finto, []), ["D1", "/log", "D2", "/log", "D3"])
+    chiamate = [r.getMessage() for r in caplog.records if r.getMessage().startswith("nodo_llm: chiamata")]
+    # D2 non lascia log; D3 riceve 6 messaggi: il comando /log non è entrato nella cronologia
+    assert chiamate == ["nodo_llm: chiamata al modello (2 messaggi)",
+                        "nodo_llm: chiamata al modello (6 messaggi)"]
+
+
+def test_attesa_compare_dopo_log_che_nasconde():
+    finto = ModelloFinto([AIMessage("R1"), AIMessage("R2")])
+    uscita = chat(costruisci_grafo(finto, []), ["D1", "/log", "D2"], con_attesa=True)
+    assert uscita == ["Assistente> R1", NASCOSTI, "[mostra]", "[nascondi]", "Assistente> R2",
+                      "Alla prossima!"]
+
+
+def test_attesa_sparisce_dopo_log_che_mostra():
+    finto = ModelloFinto([AIMessage("R1"), AIMessage("R2")])
+    uscita = chat(costruisci_grafo(finto, []), ["D1", "/log", "D2"], con_attesa=True, livello_log="WARNING")
+    assert uscita == ["[mostra]", "[nascondi]", "Assistente> R1", VISIBILI, "Assistente> R2",
+                      "Alla prossima!"]

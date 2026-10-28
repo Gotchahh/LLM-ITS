@@ -38,7 +38,8 @@ def main() -> int:
     esegui_chat(
         grafo,
         config.base_url,
-        attesa=crea_indicatore_attesa(config.livello_log, sys.stdin, sys.stdout),
+        attesa=crea_indicatore_attesa(sys.stdin, sys.stdout),
+        livello_log=config.livello_log,
     )
     return 0
 

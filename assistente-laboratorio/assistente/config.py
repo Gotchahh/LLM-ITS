@@ -17,6 +17,7 @@ VARIABILE_LOG = "LOG_LEVEL"
 
 OBBLIGATORIE = (VARIABILE_URL, VARIABILE_MODELLO, VARIABILE_FUSO)
 LIVELLI_LOG = ("DEBUG", "INFO", "WARNING", "ERROR")
+LIVELLI_LOG_VISIBILI = ("DEBUG", "INFO")
 LIVELLO_LOG_PREDEFINITO = "INFO"
 FORMATO_LOG = "[%(levelname)s] %(message)s"
 
@@ -90,3 +91,27 @@ def configura_log(livello: str) -> None:
     """Invia i log su stderr; solo il logger `assistente` segue `livello`, gli altri restano a WARNING."""
     logging.basicConfig(level=logging.WARNING, format=FORMATO_LOG, stream=sys.stderr, force=True)
     logging.getLogger("assistente").setLevel(livello)
+
+
+class ModalitaLog:
+    """Log dell'applicazione visibili o nascosti durante la sessione, alternabili con `alterna`.
+
+    Parte dalla modalità del livello d'avvio (`DEBUG` e `INFO` sono visibili, `WARNING` ed `ERROR`
+    nascosti) e non tocca i logger finché non si alterna. Tornando alla modalità d'avvio si ritrova il
+    livello d'avvio; l'altra modalità usa `INFO` (visibili) o `WARNING` (nascosti).
+    """
+
+    def __init__(self, livello_iniziale: str):
+        self.livello_iniziale = livello_iniziale
+        self.visibili_all_avvio = livello_iniziale in LIVELLI_LOG_VISIBILI
+        self.visibili = self.visibili_all_avvio
+
+    def alterna(self) -> bool:
+        """Inverte la modalità, imposta il livello del solo logger `assistente`, restituisce `visibili`."""
+        self.visibili = not self.visibili
+        if self.visibili == self.visibili_all_avvio:
+            livello = self.livello_iniziale
+        else:
+            livello = "INFO" if self.visibili else "WARNING"
+        logging.getLogger("assistente").setLevel(livello)
+        return self.visibili

@@ -1,11 +1,24 @@
 """Valori e aiuti condivisi dai test."""
 
+import logging
+
+import pytest
+
 from assistente.cli import esegui_chat
 
 VALIDO = {"LMSTUDIO_BASE_URL": "http://localhost:1234/v1", "LMSTUDIO_MODEL": "google/gemma-4-e4b",
           "APP_TIMEZONE": "Europe/Rome"}
 
 SERVER_FINTO = "http://server/v1"
+
+
+@pytest.fixture(autouse=True)
+def livello_log_app_ripristinato():
+    """Rimette il livello del logger `assistente` com'era: il comando `/log` lo cambia davvero."""
+    logger_app = logging.getLogger("assistente")
+    livello = logger_app.level
+    yield
+    logger_app.setLevel(livello)
 
 
 class ModelloFinto:
@@ -45,10 +58,11 @@ class AttesaFinta:
         self.stampato.append("[nascondi]")
 
 
-def chat(grafo, righe, con_attesa=False):
+def chat(grafo, righe, con_attesa=False, livello_log="INFO"):
     """Esegue la chat con le `righe` date (poi fine input) e restituisce le stringhe stampate.
 
     Con `con_attesa=True` usa un indicatore di attesa finto, che scrive nella stessa lista.
+    `livello_log` è il livello d'avvio dei log, da cui dipende la modalità iniziale di `/log`.
     """
     da_leggere = list(righe)
     stampato = []
@@ -59,5 +73,6 @@ def chat(grafo, righe, con_attesa=False):
         return da_leggere.pop(0)
 
     attesa = AttesaFinta(stampato) if con_attesa else None
-    esegui_chat(grafo, SERVER_FINTO, leggi=leggi, scrivi=stampato.append, attesa=attesa)
+    esegui_chat(grafo, SERVER_FINTO, leggi=leggi, scrivi=stampato.append, attesa=attesa,
+                livello_log=livello_log)
     return stampato

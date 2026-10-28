@@ -47,14 +47,21 @@ Se `.env` esiste già il comando lo sovrascrive: in quel caso modificare il file
 
 Le prime tre sono obbligatorie: se mancano o sono vuote, l'errore le elenca e rimanda a `.env.example`.
 
-Le due modalità di log, scelte con `LOG_LEVEL`:
+Le due modalità di log:
 
-- `INFO`: i passaggi dell'applicazione sono visibili su stderr nel formato `[INFO] messaggio`;
-- `WARNING`: solo il dialogo, più eventuali avvisi ed errori. Solo nella chat interattiva da tastiera,
-  durante l'attesa del modello compare `Ragionando...`, che sparisce all'arrivo della risposta; con l'input
-  da pipe non compare.
+- visibili (`LOG_LEVEL=INFO`, oppure `DEBUG` per più dettagli): i passaggi dell'applicazione compaiono su
+  stderr nel formato `[INFO] messaggio`;
+- nascosti (`LOG_LEVEL=WARNING`, oppure `ERROR`): solo il dialogo, più eventuali avvisi ed errori. Solo nella
+  chat interattiva da tastiera, durante l'attesa del modello compare `Ragionando...`, che sparisce all'arrivo
+  della risposta; con l'input da pipe, o con i log visibili, non compare.
 
-Solo i log dell'applicazione seguono `LOG_LEVEL`; quelli delle librerie esterne restano a `WARNING`.
+`LOG_LEVEL` sceglie la modalità iniziale. Durante la chat il comando `/log` passa dall'una all'altra per la
+sessione in corso, senza modificare `.env`: alla sessione successiva si riparte da `LOG_LEVEL`. Da `DEBUG` o
+`INFO` i log si nascondono (livello `WARNING`) e un secondo `/log` riporta il livello iniziale; da `WARNING` o
+`ERROR` si mostrano (livello `INFO`) e un secondo `/log` riporta il livello iniziale. La scritta `Ragionando...`
+segue il cambio: compare dalla domanda successiva a un `/log` che nasconde i log e sparisce dopo uno che li mostra.
+
+Solo i log dell'applicazione seguono `LOG_LEVEL` e `/log`; quelli delle librerie esterne restano a `WARNING`.
 
 Per leggere l'identificativo del modello dal server (LM Studio deve essere in esecuzione):
 
@@ -101,8 +108,10 @@ LM Studio deve avere il server locale avviato e il modello di `LMSTUDIO_MODEL` d
 ```
 
 Si apre la chat interattiva: prompt `Tu> `, risposte `Assistente> `. Comandi: `/esci` (oppure Ctrl+C o fine
-dell'input) per uscire; una riga vuota viene ignorata; un altro comando che inizia con `/` mostra
-`Comando sconosciuto. Comandi disponibili: /esci` senza interrogare il modello.
+dell'input) per uscire; `/log` per mostrare o nascondere i log dell'applicazione (vedi sotto); una riga vuota
+viene ignorata; un altro comando che inizia con `/` (anche `/log on`) mostra
+`Comando sconosciuto. Comandi disponibili: /esci, /log` senza interrogare il modello. I comandi non
+entrano nella cronologia e non distinguono maiuscole e spazi ai bordi (`/LOG`, ` /esci `).
 
 All'avvio l'applicazione controlla che il server risponda e che `LMSTUDIO_MODEL` sia tra i modelli
 restituiti da `/v1/models`; se non lo è, stampa su stderr l'errore con l'elenco dei modelli disponibili
@@ -192,6 +201,45 @@ Tu> Alla prossima!
 
 Il grafo ammette al massimo 10 passaggi per turno: se il modello continua a chiedere strumenti la chat stampa
 `Errore: limite di 10 passaggi raggiunto. Turno annullato.`, scarta il turno e prosegue.
+
+## Mostrare e nascondere i log
+
+Il comando `/log` alterna le due modalità di log (vedi «Configurazione») senza interrogare il modello e senza
+entrare nella cronologia; risponde con `Log nascosti: solo dialogo. Scrivi /log per mostrarli.` oppure
+`Log visibili. Scrivi /log per nasconderli.` Prova da pipe, con il livello predefinito (`INFO`): una domanda con
+i log visibili, `/log`, una domanda con i log nascosti, `/log`, una domanda di nuovo con i log visibili:
+
+```powershell
+"Che ore sono?`n/log`nChe ore sono a New York?`n/log`nChe giorno è oggi?`n/esci" | .\.venv\Scripts\python.exe -m assistente
+```
+
+```text
+Tu> [INFO] nodo_llm: chiamata al modello (2 messaggi)
+[INFO] nodo_llm: risposta ricevuta in ... s
+[INFO] instradamento: richiesta strumento ora_corrente {}
+[INFO] nodo_strumenti: ora_corrente -> mercoledì 2026-10-28T11:40:19+01:00 (Europe/Rome)
+[INFO] nodo_llm: chiamata al modello (4 messaggi)
+[INFO] nodo_llm: risposta ricevuta in ... s
+[INFO] instradamento: nessuno strumento -> fine
+Assistente> Sono le 11:40 di mercoledì 28 ottobre 2026, ora di Roma (CET).
+Tu> Log nascosti: solo dialogo. Scrivi /log per mostrarli.
+Tu> Assistente> A New York sono le 06:40 di mercoledì 28 ottobre 2026 (EDT).
+Tu> Log visibili. Scrivi /log per nasconderli.
+Tu> [INFO] nodo_llm: chiamata al modello (10 messaggi)
+[INFO] nodo_llm: risposta ricevuta in ... s
+[INFO] instradamento: richiesta strumento ora_corrente {}
+[INFO] nodo_strumenti: ora_corrente -> mercoledì 2026-10-28T11:41:34+01:00 (Europe/Rome)
+[INFO] nodo_llm: chiamata al modello (12 messaggi)
+[INFO] nodo_llm: risposta ricevuta in ... s
+[INFO] instradamento: nessuno strumento -> fine
+Assistente> Oggi è mercoledì 28 ottobre 2026.
+Tu> Alla prossima!
+```
+
+Il secondo turno non lascia righe `[INFO]`, ma ha usato comunque lo strumento: la terza chiamata riceve 10
+messaggi (sistema, quattro per ciascuno dei due turni con lo strumento, nuova domanda), quindi i due `/log` non
+sono entrati nella cronologia. In questa prova la scritta `Ragionando...` non compare mai: si vede solo nella
+chat da tastiera, e solo con i log nascosti.
 
 ## Diagnosi
 

@@ -5,6 +5,7 @@ from conftest import VALIDO
 
 from assistente.config import (
     ErroreConfigurazione,
+    ModalitaLog,
     carica_configurazione,
     configura_log,
     leggi_file_env,
@@ -87,3 +88,32 @@ def test_modalita_silenziosa(log_isolati):
     configura_log("INFO")
     configura_log("WARNING")
     assert not logging.getLogger("assistente.grafo").isEnabledFor(logging.INFO)
+
+
+@pytest.mark.parametrize("iniziale, visibili, dopo_uno, dopo_due", [
+    ("DEBUG", True, "WARNING", "DEBUG"),
+    ("INFO", True, "WARNING", "INFO"),
+    ("WARNING", False, "INFO", "WARNING"),
+    ("ERROR", False, "INFO", "ERROR"),
+])
+def test_modalita_log_alterna_e_torna_al_livello_d_avvio(log_isolati, iniziale, visibili, dopo_uno, dopo_due):
+    configura_log(iniziale)
+    modalita = ModalitaLog(iniziale)
+    assert modalita.visibili is visibili
+    assert modalita.alterna() is (not visibili)
+    assert logging.getLevelName(logging.getLogger("assistente").level) == dopo_uno
+    assert modalita.alterna() is visibili
+    assert logging.getLevelName(logging.getLogger("assistente").level) == dopo_due
+
+
+def test_modalita_log_non_tocca_i_logger_alla_creazione(log_isolati):
+    configura_log("DEBUG")
+    ModalitaLog("INFO")
+    assert logging.getLogger("assistente").level == logging.DEBUG
+
+
+def test_modalita_log_tocca_solo_i_log_dell_applicazione(log_isolati):
+    configura_log("WARNING")
+    ModalitaLog("WARNING").alterna()
+    assert logging.getLogger("assistente.grafo").isEnabledFor(logging.INFO)
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)

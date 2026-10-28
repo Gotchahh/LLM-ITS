@@ -4,11 +4,15 @@ import logging
 
 from langgraph.errors import GraphRecursionError
 
+from assistente.config import LIVELLO_LOG_PREDEFINITO, ModalitaLog
 from assistente.grafo import LIMITE_PASSAGGI, RispostaNonValida, esegui_turno
 
 logger = logging.getLogger(__name__)
 
 COMANDO_ESCI = "/esci"
+COMANDO_LOG = "/log"
+MESSAGGIO_LOG_VISIBILI = "Log visibili. Scrivi /log per nasconderli."
+MESSAGGIO_LOG_NASCOSTI = "Log nascosti: solo dialogo. Scrivi /log per mostrarli."
 TESTO_ATTESA = "Ragionando..."
 
 
@@ -35,24 +39,26 @@ class IndicatoreAttesa:
         self.visibile = False
 
 
-def crea_indicatore_attesa(livello_log: str, ingresso, uscita) -> IndicatoreAttesa | None:
-    """Restituisce l'indicatore solo con log silenziosi (WARNING o ERROR) e ingresso e uscita da terminale."""
-    silenzioso = livello_log in ("WARNING", "ERROR")
-    if silenzioso and ingresso.isatty() and uscita.isatty():
+def crea_indicatore_attesa(ingresso, uscita) -> IndicatoreAttesa | None:
+    """Restituisce l'indicatore solo se ingresso e uscita sono un terminale."""
+    if ingresso.isatty() and uscita.isatty():
         return IndicatoreAttesa(uscita)
     return None
 
 
-def esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None) -> None:
+def esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None,
+                livello_log: str = LIVELLO_LOG_PREDEFINITO) -> None:
     """Legge le righe dell'utente, esegue un turno del grafo per ciascuna e stampa la risposta.
 
     La cronologia vive solo in questa funzione, per la durata della sessione. Un turno fallito
     stampa un errore e viene scartato: la cronologia resta com'era e la chat prosegue.
-    Con un indicatore `attesa`, la scritta compare durante il turno e sparisce prima di ogni
-    stampa successiva (risposta, errore o saluto dopo Ctrl+C).
+    `/log` alterna log visibili e nascosti, a partire dalla modalità di `livello_log`.
+    Con un indicatore `attesa` e i log nascosti, la scritta compare durante il turno e sparisce
+    prima di ogni stampa successiva (risposta, errore o saluto dopo Ctrl+C).
     Termina con `/esci`, a fine input o con Ctrl+C.
     """
     cronologia = []
+    modalita_log = ModalitaLog(livello_log)
     try:
         while True:
             # La pipe di PowerShell può anteporre un BOM (U+FEFF), che strip() non considera spazio.
@@ -60,17 +66,24 @@ def esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None) -> N
             if not riga:
                 continue
             if riga.startswith("/"):
-                if riga.lower() == COMANDO_ESCI:
+                comando = riga.lower()
+                if comando == COMANDO_ESCI:
                     break
-                scrivi(f"Comando sconosciuto. Comandi disponibili: {COMANDO_ESCI}")
+                if comando == COMANDO_LOG:
+                    visibili = modalita_log.alterna()
+                    scrivi(MESSAGGIO_LOG_VISIBILI if visibili else MESSAGGIO_LOG_NASCOSTI)
+                else:
+                    scrivi(f"Comando sconosciuto. Comandi disponibili: {COMANDO_ESCI}, {COMANDO_LOG}")
                 continue
+            # La scritta di attesa si decide a ogni turno, quindi segue i cambi fatti con /log.
+            usa_attesa = attesa is not None and not modalita_log.visibili
             try:
-                if attesa is not None:
+                if usa_attesa:
                     attesa.mostra()
                 try:
                     cronologia = esegui_turno(grafo, cronologia, riga)
                 finally:
-                    if attesa is not None:
+                    if usa_attesa:
                         attesa.nascondi()
             except GraphRecursionError:
                 scrivi(f"Errore: limite di {LIMITE_PASSAGGI} passaggi raggiunto. Turno annullato.")
