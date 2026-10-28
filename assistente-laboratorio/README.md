@@ -50,7 +50,9 @@ Le prime tre sono obbligatorie: se mancano o sono vuote, l'errore le elenca e ri
 Le due modalità di log, scelte con `LOG_LEVEL`:
 
 - `INFO`: i passaggi dell'applicazione sono visibili su stderr nel formato `[INFO] messaggio`;
-- `WARNING`: solo il dialogo, più eventuali avvisi ed errori.
+- `WARNING`: solo il dialogo, più eventuali avvisi ed errori. Solo nella chat interattiva da tastiera,
+  durante l'attesa del modello compare `Ragionando...`, che sparisce all'arrivo della risposta; con l'input
+  da pipe non compare.
 
 Solo i log dell'applicazione seguono `LOG_LEVEL`; quelli delle librerie esterne restano a `WARNING`.
 

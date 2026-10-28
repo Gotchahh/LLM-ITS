@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from assistente.cli import esegui_chat
+from assistente.cli import crea_indicatore_attesa, esegui_chat
 from assistente.config import (
     ErroreConfigurazione,
     carica_configurazione,
@@ -35,7 +35,11 @@ def main() -> int:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1
     grafo = costruisci_grafo(crea_modello(config), [crea_strumento_orologio(config.fuso)])
-    esegui_chat(grafo, config.base_url)
+    esegui_chat(
+        grafo,
+        config.base_url,
+        attesa=crea_indicatore_attesa(config.livello_log, sys.stdin, sys.stdout),
+    )
     return 0
 
 

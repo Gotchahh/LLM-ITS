@@ -1,9 +1,12 @@
+import io
 import logging
 
+import pytest
 from conftest import SERVER_FINTO, ModelloFinto, chat
 from langchain_core.messages import AIMessage
 from langgraph.errors import GraphRecursionError
 
+from assistente.cli import IndicatoreAttesa, crea_indicatore_attesa
 from assistente.grafo import costruisci_grafo
 
 
@@ -85,3 +88,59 @@ def test_ctrl_c_durante_il_turno():                                    # Review 
 
 def test_fine_input():
     assert chat(costruisci_grafo(ModelloFinto([]), []), [])[-1] == "Alla prossima!"
+
+
+class TerminaleFinto(io.StringIO):
+    """Stream di testo che si dichiara un terminale."""
+
+    def isatty(self):
+        return True
+
+
+def test_attesa_mostrata_e_nascosta_prima_della_risposta():
+    uscita = chat(costruisci_grafo(ModelloFinto([AIMessage("R1")]), []), ["D1", "/esci"], con_attesa=True)
+    assert uscita == ["[mostra]", "[nascondi]", "Assistente> R1", "Alla prossima!"]
+
+
+def test_attesa_nascosta_prima_dell_errore():
+    finto = ModelloFinto([ConnectionError("Connection refused")])
+    uscita = chat(costruisci_grafo(finto, []), ["D1"], con_attesa=True)
+    assert uscita[:2] == ["[mostra]", "[nascondi]"] and uscita[2].startswith("Errore: ")
+
+
+def test_attesa_nascosta_prima_del_saluto_dopo_ctrl_c():
+    uscita = chat(costruisci_grafo(ModelloFinto([KeyboardInterrupt()]), []), ["D1"], con_attesa=True)
+    assert uscita == ["[mostra]", "[nascondi]", "Alla prossima!"]
+
+
+def test_righe_vuote_e_comandi_senza_attesa():
+    uscita = chat(costruisci_grafo(ModelloFinto([]), []), ["", "   ", "/aiuto", "/esci"], con_attesa=True)
+    assert uscita == ["Comando sconosciuto. Comandi disponibili: /esci", "Alla prossima!"]
+
+
+def test_indicatore_scrive_e_cancella_esattamente():
+    uscita = io.StringIO()
+    indicatore = IndicatoreAttesa(uscita)
+    indicatore.mostra()
+    assert uscita.getvalue() == "Ragionando..."
+    indicatore.nascondi()
+    indicatore.nascondi()                     # già nascosta: non scrive altro
+    assert uscita.getvalue() == "Ragionando..." + "\b" * 13 + " " * 13 + "\b" * 13
+
+
+def test_indicatore_non_mostrato_non_cancella_nulla():
+    uscita = io.StringIO()
+    IndicatoreAttesa(uscita).nascondi()
+    assert uscita.getvalue() == ""
+
+
+@pytest.mark.parametrize("livello, ingresso, uscita, atteso", [
+    ("INFO", TerminaleFinto(), TerminaleFinto(), False),
+    ("DEBUG", TerminaleFinto(), TerminaleFinto(), False),
+    ("WARNING", io.StringIO(), TerminaleFinto(), False),
+    ("WARNING", TerminaleFinto(), io.StringIO(), False),
+    ("WARNING", TerminaleFinto(), TerminaleFinto(), True),
+    ("ERROR", TerminaleFinto(), TerminaleFinto(), True),
+])
+def test_scelta_dell_indicatore(livello, ingresso, uscita, atteso):
+    assert isinstance(crea_indicatore_attesa(livello, ingresso, uscita), IndicatoreAttesa) is atteso

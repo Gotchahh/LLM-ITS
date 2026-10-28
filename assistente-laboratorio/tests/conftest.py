@@ -32,8 +32,24 @@ class ModelloFinto:
         return voce
 
 
-def chat(grafo, righe):
-    """Esegue la chat con le `righe` date (poi fine input) e restituisce le stringhe stampate."""
+class AttesaFinta:
+    """Indicatore di attesa simulato: registra `[mostra]` e `[nascondi]` tra le righe stampate."""
+
+    def __init__(self, stampato):
+        self.stampato = stampato
+
+    def mostra(self):
+        self.stampato.append("[mostra]")
+
+    def nascondi(self):
+        self.stampato.append("[nascondi]")
+
+
+def chat(grafo, righe, con_attesa=False):
+    """Esegue la chat con le `righe` date (poi fine input) e restituisce le stringhe stampate.
+
+    Con `con_attesa=True` usa un indicatore di attesa finto, che scrive nella stessa lista.
+    """
     da_leggere = list(righe)
     stampato = []
 
@@ -42,5 +58,6 @@ def chat(grafo, righe):
             raise EOFError
         return da_leggere.pop(0)
 
-    esegui_chat(grafo, SERVER_FINTO, leggi=leggi, scrivi=stampato.append)
+    attesa = AttesaFinta(stampato) if con_attesa else None
+    esegui_chat(grafo, SERVER_FINTO, leggi=leggi, scrivi=stampato.append, attesa=attesa)
     return stampato
