@@ -1,10 +1,11 @@
 """Grafo LangGraph dell'assistente: stato, nodi e collegamenti."""
 
+import json
 import logging
 import time
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -34,14 +35,31 @@ class Stato(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
 
-def costruisci_grafo(modello, strumenti: list[BaseTool]) -> CompiledStateGraph:
-    """Costruisce il grafo START -> nodo_llm -> END attorno a `modello`.
+def instrada(stato: Stato) -> str:
+    """Arco condizionale dopo `nodo_llm`: "nodo_strumenti" se il modello chiede strumenti, altrimenti END."""
+    richieste = stato["messages"][-1].tool_calls
+    if not richieste:
+        logger.info("instradamento: nessuno strumento -> fine")
+        return END
+    for richiesta in richieste:
+        logger.info(
+            "instradamento: richiesta strumento %s %s",
+            richiesta["name"],
+            json.dumps(richiesta["args"], ensure_ascii=False),
+        )
+    return "nodo_strumenti"
 
+
+def costruisci_grafo(modello, strumenti: list[BaseTool]) -> CompiledStateGraph:
+    """Costruisce il grafo attorno a `modello` e agli `strumenti`.
+
+    START -> nodo_llm -> (instrada) -> nodo_strumenti | END, e nodo_strumenti -> nodo_llm.
     Gli strumenti vengono associati al modello una volta sola, e solo se l'elenco non è vuoto:
     un elenco `tools` vuoto può essere rifiutato dall'API.
     """
     if strumenti:
         modello = modello.bind_tools(strumenti)
+    per_nome = {strumento.name: strumento for strumento in strumenti}
 
     def nodo_llm(stato: Stato) -> dict:
         """Interroga il modello con il prompt di sistema (non salvato) e la cronologia."""
@@ -58,10 +76,35 @@ def costruisci_grafo(modello, strumenti: list[BaseTool]) -> CompiledStateGraph:
             raise RispostaNonValida("il modello non ha prodotto una risposta valida")
         return {"messages": [risposta]}
 
+    def nodo_strumenti(stato: Stato) -> dict:
+        """Esegue ogni richiesta dell'ultimo messaggio e risponde con un ToolMessage per ciascuna."""
+        risposte = []
+        for richiesta in stato["messages"][-1].tool_calls:
+            nome = richiesta["name"]
+            strumento = per_nome.get(nome)
+            if strumento is None:
+                logger.warning("nodo_strumenti: strumento sconosciuto %s", nome)
+                risultato = f"Errore: strumento sconosciuto {nome}"
+            else:
+                argomenti = {k: v for k, v in richiesta["args"].items() if k in strumento.args}
+                ignorati = {k: v for k, v in richiesta["args"].items() if k not in strumento.args}
+                if ignorati:
+                    logger.warning(
+                        "nodo_strumenti: argomenti ignorati per %s: %s",
+                        nome,
+                        json.dumps(ignorati, ensure_ascii=False),
+                    )
+                risultato = strumento.invoke(argomenti)
+                logger.info("nodo_strumenti: %s -> %s", nome, risultato)
+            risposte.append(ToolMessage(content=risultato, tool_call_id=richiesta["id"], name=nome))
+        return {"messages": risposte}
+
     costruttore = StateGraph(Stato)
     costruttore.add_node("nodo_llm", nodo_llm)
+    costruttore.add_node("nodo_strumenti", nodo_strumenti)
     costruttore.add_edge(START, "nodo_llm")
-    costruttore.add_edge("nodo_llm", END)
+    costruttore.add_conditional_edges("nodo_llm", instrada, ["nodo_strumenti", END])
+    costruttore.add_edge("nodo_strumenti", "nodo_llm")
     return costruttore.compile()
 
 

@@ -18,6 +18,7 @@ from assistente.modello import (
     leggi_modelli_disponibili,
     verifica_modello,
 )
+from assistente.strumenti import crea_strumento_orologio
 
 
 def main() -> int:
@@ -33,7 +34,7 @@ def main() -> int:
     except (ErroreConfigurazione, ErroreServer) as errore:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1
-    grafo = costruisci_grafo(crea_modello(config), strumenti=[])
+    grafo = costruisci_grafo(crea_modello(config), [crea_strumento_orologio(config.fuso)])
     esegui_chat(grafo, config.base_url)
     return 0
 

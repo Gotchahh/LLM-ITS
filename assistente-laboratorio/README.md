@@ -2,8 +2,8 @@
 
 Applicazione da terminale in Python costruita attorno a un grafo LangGraph esplicito.
 Il grafo inoltra la conversazione al modello locale servito da LM Studio e conserva la
-cronologia per la durata della sessione (nessuna persistenza). Lo strumento orologio
-arriverà negli incrementi successivi.
+cronologia per la durata della sessione (nessuna persistenza). Il modello può chiedere lo
+strumento orologio `ora_corrente`, che il programma esegue davvero.
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 
@@ -83,8 +83,10 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 .\.venv\Scripts\python.exe -m pytest -m reale -v
 ```
 
-Sono due prove: una risposta ordinaria e il ricordo di un'informazione data nel turno precedente.
-Con un modello locale possono richiedere alcuni minuti (la prima chiamata carica il modello).
+Sono tre prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
+precedente e due domande sull'ora nella stessa sessione (due richieste di `ora_corrente`, una per turno).
+Con un modello locale possono richiedere alcuni minuti (la prima chiamata carica il modello; con
+`google/gemma-4-e4b` le tre prove sono durate circa 4 minuti e mezzo).
 
 ## Avvio
 
@@ -133,6 +135,54 @@ Una riga vuota o di soli spazi viene ignorata senza interrogare il modello:
 ```
 
 stampa `Tu> Tu> Alla prossima!`.
+
+## Strumento orologio
+
+Per le domande su ora, data o giorno attuali il modello chiede lo strumento `ora_corrente`, senza argomenti, e
+il programma lo esegue nel fuso `APP_TIMEZONE`. Prova con tre domande (la terza chiede l'ora di un'altra città):
+
+```powershell
+"Che ore sono?`nChe giorno della settimana è oggi?`nChe ore sono a Tokyo?`n/esci" | .\.venv\Scripts\python.exe -m assistente
+```
+
+Con `LOG_LEVEL=INFO` la chiamata allo strumento si riconosce nei log, su stderr, da queste due righe, che
+precedono la risposta finale:
+
+```text
+[INFO] instradamento: richiesta strumento ora_corrente {}
+[INFO] nodo_strumenti: ora_corrente -> mercoledì 2026-10-28T09:41:03+01:00 (Europe/Rome)
+```
+
+La prima è la richiesta strutturata del modello (nome e argomenti), la seconda il risultato dell'esecuzione,
+che viene restituito al modello: segue una nuova `nodo_llm: chiamata al modello` con due messaggi in più
+(la richiesta e il risultato) e infine `instradamento: nessuno strumento -> fine`. Una risposta sull'ora senza
+queste due righe non proviene dallo strumento.
+
+Per l'ora di un'altra città il modello chiama l'orologio e converte da sé: la risposta riporta anche l'ora
+locale di partenza, così il calcolo si controlla a mano. La conversione può essere sbagliata: nella prova del
+28/10/2026 una volta il modello ha risposto 16:42 a Tokyo partendo dalle 09:42 di Roma, mentre il valore
+corretto era 17:42 (Tokyo è UTC+9, Roma in quel giorno UTC+1); un'altra esecuzione con la stessa domanda ha
+dato 17:45 da 09:45.
+
+Modalità silenziosa, con la variabile impostata solo per la sessione di PowerShell corrente:
+
+```powershell
+$env:LOG_LEVEL = "WARNING"
+"Che ore sono?`nChe giorno della settimana è oggi?`nChe ore sono a Tokyo?`n/esci" | .\.venv\Scripts\python.exe -m assistente
+Remove-Item Env:LOG_LEVEL
+```
+
+Restano solo i dialoghi, senza righe `[INFO]`:
+
+```text
+Tu> Assistente> Sono le 09:44 del giorno mercoledì 28 ottobre 2026, ora di Roma.
+Tu> Assistente> Oggi è mercoledì.
+Tu> Assistente> Attualmente sono le 09:45 a Roma (ora di partenza). A Tokyo, ora sono le **17:45** di mercoledì 28 ottobre 2026.
+Tu> Alla prossima!
+```
+
+Il grafo ammette al massimo 10 passaggi per turno: se il modello continua a chiedere strumenti la chat stampa
+`Errore: limite di 10 passaggi raggiunto. Turno annullato.`, scarta il turno e prosegue.
 
 ## Diagnosi
 
