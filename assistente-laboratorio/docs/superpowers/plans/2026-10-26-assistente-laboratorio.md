@@ -22,7 +22,7 @@ LM Studio), pytest, Docker Compose.
 - `requirements.txt` contiene **solo** le dipendenze concordate: `langgraph==1.2.17`, `langchain-openai==1.7.2`,
   `tzdata==2026.5`, `python-dotenv==1.2.4`. `requirements-dev.txt`: `-r requirements.txt`, `pytest==9.1.1`.
   Nessun'altra libreria viene aggiunta o importata direttamente: in particolare **non** si importano
-  `openai` né `httpx`. Unica eccezione obbligata: i tipi dei messaggi e degli strumenti (`AIMessage`,
+  `openai`, `httpx` né `pydantic`. Unica eccezione obbligata: i tipi dei messaggi e degli strumenti (`AIMessage`,
   `HumanMessage`, `SystemMessage`, `ToolMessage`, `StructuredTool`) si importano da `langchain_core`, il
   pacchetto base che langgraph e langchain-openai installano da sé e che usano come formato dei messaggi;
   non va in `requirements.txt` e la sua versione la decide langchain-openai.
@@ -479,6 +479,243 @@ def test_risposta_con_testo_e_richiesta_va_agli_strumenti():
 - [ ] **Step 7: README** — come riconoscere nei log la chiamata allo strumento; modalità silenziosa.
 - [ ] **Step 8: Commit** `feat(grafo): instrada le richieste allo strumento orologio con limite di passaggi`.
 
+### Task 6A: Orologio con fuso facoltativo
+
+Aggiunto il 28/10/2026 con la proposta approvata dall'utente: il modello sbagliava l'ora di New York
+convertendo da sé (4:00 invece di 5:00). Ora passa il fuso IANA e l'ora la calcola il programma
+(specifica: contratto di `ora_corrente`, requisiti del prompt, casi limite).
+
+**Files:**
+- Modify: `assistente/strumenti.py`, `assistente/grafo.py` (solo `PROMPT_DI_SISTEMA`)
+- Modify: `tests/test_strumenti.py`, `tests/test_grafo.py`, `tests/test_reale.py`, `README.md`
+
+**Interfaces:**
+- Consumes: `formatta_ora`, `crea_strumento_orologio` (Task 5); `nodo_strumenti` (Task 6), che passa allo
+  strumento solo gli argomenti presenti in `strumento.args` e non cambia: `fuso` diventa ammesso, argomenti
+  diversi (es. `timezone`) restano scartati con WARNING.
+- Produces in `strumenti.py` (firma di `crea_strumento_orologio` invariata):
+  - `DESCRIZIONE = "Restituisce data, giorno della settimana e ora correnti: senza argomenti nel fuso orario configurato, con fuso nel fuso orario di un'altra località; da usare per ogni domanda su ora, data o giorno attuali"`;
+  - `DESCRIZIONE_FUSO = "Nome IANA del fuso orario della località richiesta, per esempio America/New_York o Asia/Tokyo; omettere per il fuso orario configurato"`;
+  - `ERRORE_FUSO = "Errore: fuso orario sconosciuto «{}»: serve un nome IANA, per esempio America/New_York"`;
+  - `ERRORE_FUSO_NON_TESTO = "Errore: il fuso orario deve essere un nome IANA, per esempio America/New_York"`;
+  - funzione interna `ora_corrente(fuso: Annotated[str | None, DESCRIZIONE_FUSO] = None) -> str`
+    (`Annotated` da `typing`; nessun import di `pydantic`):
+    `None`, vuoto o di soli spazi → `formatta_ora(adesso(), <fuso configurato>)`; altrimenti
+    `ZoneInfo(fuso.strip())` e `formatta_ora` in quel fuso; se `ZoneInfo` solleva `ZoneInfoNotFoundError`,
+    `ValueError` o `OSError` (le stesse eccezioni di `config.py`) restituisce `ERRORE_FUSO.format(fuso)`,
+    senza sollevare;
+  - `StructuredTool.from_function(func=ora_corrente, name="ora_corrente", description=DESCRIZIONE,
+    handle_validation_error=ERRORE_FUSO_NON_TESTO)`: un `fuso` che non è un testo (es. `5`) restituisce
+    quel messaggio invece di sollevare `ValidationError`.
+- Produces in `grafo.py`: in `PROMPT_DI_SISTEMA` l'ultima frase («Per l'ora di un'altra città chiama
+  ora_corrente, converti dall'ora locale e indica nella risposta anche l'ora locale da cui sei partito.»)
+  diventa: `"Per l'ora di un'altra città chiama ora_corrente con il fuso IANA di quella città "
+  "(per esempio America/New_York) e usa il risultato così com'è, senza convertire da te."`.
+  Il resto del prompt non cambia.
+
+- [ ] **Step 1: Scrivere i test che falliscono** in `tests/test_strumenti.py` (istante fisso
+  `2026-10-28 08:56 UTC`: mercoledì, settimana in cui Roma è UTC+1 e New York UTC−4):
+
+```python
+ISTANTE = datetime(2026, 10, 28, 8, 56, tzinfo=UTC)
+orologio = crea_strumento_orologio(ROMA, adesso=lambda: ISTANTE)
+
+
+def test_strumento_usa_l_istante_fornito():        # aggiornato: prima controllava s.args == {}
+    s = crea_strumento_orologio(ROMA, adesso=lambda: datetime(2026, 10, 26, 15, 42, 10, tzinfo=UTC))
+    assert s.name == "ora_corrente" and set(s.args) == {"fuso"}
+    assert s.invoke({}) == "lunedì 2026-10-26T16:42:10+01:00 (Europe/Rome)"
+
+
+def test_parametro_fuso_facoltativo_e_descritto():
+    assert "IANA" in orologio.args["fuso"]["description"]
+    assert "fuso" not in orologio.tool_call_schema.model_json_schema().get("required", [])
+
+
+@pytest.mark.parametrize("argomenti, atteso", [
+    ({}, "mercoledì 2026-10-28T09:56:00+01:00 (Europe/Rome)"),
+    ({"fuso": None}, "mercoledì 2026-10-28T09:56:00+01:00 (Europe/Rome)"),
+    ({"fuso": ""}, "mercoledì 2026-10-28T09:56:00+01:00 (Europe/Rome)"),
+    ({"fuso": "  "}, "mercoledì 2026-10-28T09:56:00+01:00 (Europe/Rome)"),
+    ({"fuso": "America/New_York"}, "mercoledì 2026-10-28T04:56:00-04:00 (America/New_York)"),
+    ({"fuso": "Asia/Tokyo"}, "mercoledì 2026-10-28T17:56:00+09:00 (Asia/Tokyo)"),
+])
+def test_ora_nel_fuso_richiesto(argomenti, atteso):
+    assert orologio.invoke(argomenti) == atteso
+
+
+@pytest.mark.parametrize("fuso", ["New York", "Europa/Roma", "../Europe/Rome"])
+def test_fuso_non_valido_restituisce_un_errore(fuso):
+    assert orologio.invoke({"fuso": fuso}) == \
+        f"Errore: fuso orario sconosciuto «{fuso}»: serve un nome IANA, per esempio America/New_York"
+
+
+def test_fuso_non_testuale_restituisce_un_errore():
+    assert orologio.invoke({"fuso": 5}) == \
+        "Errore: il fuso orario deve essere un nome IANA, per esempio America/New_York"
+```
+
+  e in `tests/test_grafo.py` (con l'`orologio` già definito lì, istante `2026-10-26 15:42:10 UTC`):
+
+```python
+def test_richiesta_con_fuso_arriva_allo_strumento(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([chiamata("c1", {"fuso": "America/New_York"}), AIMessage("ok")])
+    nuova = esegui_turno(costruisci_grafo(finto, [orologio]), [], "Che ore sono a New York?")
+    assert nuova[2].content == "lunedì 2026-10-26T11:42:10-04:00 (America/New_York)"
+    assert 'instradamento: richiesta strumento ora_corrente {"fuso": "America/New_York"}' in caplog.messages
+    assert [r for r in caplog.records if r.levelname == "WARNING"] == []
+```
+
+- [ ] **Step 2:** pytest → FAIL. **Step 3:** implementare. **Step 4:** pytest completo → PASS
+  (`test_argomenti_inattesi_ignorati` resta valido senza modifiche).
+- [ ] **Step 5: Test reale** in `tests/test_reale.py`:
+
+```python
+def test_reale_ora_di_un_altra_citta(grafo):
+    cronologia = esegui_turno(grafo, [], "Che ore sono a New York?")
+    risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "ora_corrente"]
+    assert any(r.endswith("(America/New_York)") for r in risultati)
+```
+
+  Run: `.\.venv\Scripts\python.exe -m pytest -m reale -v` → 4 passed. Un fallimento si riporta all'utente.
+- [ ] **Step 6: Prova manuale eseguita da Claude**:
+  `"Che ore sono a New York?`nChe ore sono a Tokyo?`n/esci" | .\.venv\Scripts\python.exe -m assistente`
+  → nei log `instradamento: richiesta strumento ora_corrente {"fuso": "America/New_York"}` e il risultato con
+  `-04:00` (poi lo stesso per `Asia/Tokyo` con `+09:00`); l'ora di New York nella risposta coincide con
+  `[TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), 'Eastern Standard Time')`.
+- [ ] **Step 7: README**, sezione «Strumento orologio»:
+  - `ora_corrente` senza argomenti dà l'ora del fuso `APP_TIMEZONE`; con `fuso` (nome IANA) l'ora di un'altra
+    località, calcolata dal programma; un fuso non valido produce un testo d'errore che il modello può correggere;
+  - nei due comandi di prova la terza domanda diventa `Che ore sono a New York?`; i comandi si rieseguono
+    alla lettera (modalità normale e silenziosa) e gli esempi di log e di dialogo si sostituiscono con l'output
+    di queste esecuzioni, compresa la coppia di righe con `{"fuso": "America/New_York"}`;
+  - si toglie il paragrafo sulla conversione fatta dal modello (l'aneddoto di Tokyo);
+  - sezione «Test»: le prove reali diventano quattro, con l'ora di New York; la durata indicata è quella
+    misurata in questo task.
+- [ ] **Step 8: Commit** `feat(strumenti): aggiunge il fuso facoltativo all'orologio`.
+
+### Task 6B: «Ragionando...» in modalità silenziosa
+
+Aggiunto il 28/10/2026 con la proposta approvata dall'utente (specifica: decisioni, sezione Terminale, casi
+limite e limite estetico accettato).
+
+**Files:**
+- Modify: `assistente/cli.py`, `assistente/__main__.py`
+- Modify: `tests/conftest.py`, `tests/test_cli.py`, `README.md`
+
+**Interfaces:**
+- Consumes: `esegui_chat` (Task 4), `Configurazione.livello_log` (Task 2: già in maiuscolo, uno di
+  `DEBUG`, `INFO`, `WARNING`, `ERROR`).
+- Produces in `cli.py`:
+  - `TESTO_ATTESA = "Ragionando..."`;
+  - `class IndicatoreAttesa` con `__init__(self, uscita)` (uno stream di testo), `mostra()` che scrive
+    `TESTO_ATTESA` senza andare a capo e chiama `uscita.flush()`, `nascondi()` che, **solo se la scritta è
+    visibile**, scrive `"\b" * n + " " * n + "\b" * n` con `n = len(TESTO_ATTESA)` e chiama `flush()`;
+  - `crea_indicatore_attesa(livello_log: str, ingresso, uscita) -> IndicatoreAttesa | None`: restituisce
+    `IndicatoreAttesa(uscita)` solo se `livello_log` è `WARNING` o `ERROR` **e** `ingresso.isatty()` **e**
+    `uscita.isatty()`; altrimenti `None`;
+  - `esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None)`: con un indicatore, il turno
+    diventa
+
+```python
+            try:
+                if attesa is not None:
+                    attesa.mostra()
+                try:
+                    cronologia = esegui_turno(grafo, cronologia, riga)
+                finally:
+                    if attesa is not None:
+                        attesa.nascondi()
+            except GraphRecursionError:
+                ...                      # gestori esistenti invariati
+```
+
+    così la scritta sparisce prima della risposta, dell'errore o (dopo Ctrl+C) di «Alla prossima!»; righe
+    vuote e comandi non la mostrano. Con `attesa=None` il comportamento è identico a prima.
+- Produces in `__main__.py`: `esegui_chat(grafo, config.base_url,
+  attesa=crea_indicatore_attesa(config.livello_log, sys.stdin, sys.stdout))`.
+- Produces in `tests/conftest.py`: `AttesaFinta(stampato)`, che con `mostra()`/`nascondi()` aggiunge
+  `"[mostra]"`/`"[nascondi]"` alla stessa lista delle righe stampate; `chat(grafo, righe, con_attesa=False)`
+  passa `attesa=AttesaFinta(stampato)` solo con `con_attesa=True` (i test esistenti non cambiano).
+
+- [ ] **Step 1: Scrivere i test che falliscono** in `tests/test_cli.py`:
+
+```python
+class TerminaleFinto(io.StringIO):
+    """Stream di testo che si dichiara un terminale."""
+
+    def isatty(self):
+        return True
+
+
+def test_attesa_mostrata_e_nascosta_prima_della_risposta():
+    uscita = chat(costruisci_grafo(ModelloFinto([AIMessage("R1")]), []), ["D1", "/esci"], con_attesa=True)
+    assert uscita == ["[mostra]", "[nascondi]", "Assistente> R1", "Alla prossima!"]
+
+
+def test_attesa_nascosta_prima_dell_errore():
+    finto = ModelloFinto([ConnectionError("Connection refused")])
+    uscita = chat(costruisci_grafo(finto, []), ["D1"], con_attesa=True)
+    assert uscita[:2] == ["[mostra]", "[nascondi]"] and uscita[2].startswith("Errore: ")
+
+
+def test_attesa_nascosta_prima_del_saluto_dopo_ctrl_c():
+    uscita = chat(costruisci_grafo(ModelloFinto([KeyboardInterrupt()]), []), ["D1"], con_attesa=True)
+    assert uscita == ["[mostra]", "[nascondi]", "Alla prossima!"]
+
+
+def test_righe_vuote_e_comandi_senza_attesa():
+    uscita = chat(costruisci_grafo(ModelloFinto([]), []), ["", "   ", "/aiuto", "/esci"], con_attesa=True)
+    assert uscita == ["Comando sconosciuto. Comandi disponibili: /esci", "Alla prossima!"]
+
+
+def test_indicatore_scrive_e_cancella_esattamente():
+    uscita = io.StringIO()
+    indicatore = IndicatoreAttesa(uscita)
+    indicatore.mostra()
+    assert uscita.getvalue() == "Ragionando..."
+    indicatore.nascondi()
+    indicatore.nascondi()                     # già nascosta: non scrive altro
+    assert uscita.getvalue() == "Ragionando..." + "\b" * 13 + " " * 13 + "\b" * 13
+
+
+def test_indicatore_non_mostrato_non_cancella_nulla():
+    uscita = io.StringIO()
+    IndicatoreAttesa(uscita).nascondi()
+    assert uscita.getvalue() == ""
+
+
+@pytest.mark.parametrize("livello, ingresso, uscita, atteso", [
+    ("INFO", TerminaleFinto(), TerminaleFinto(), False),
+    ("DEBUG", TerminaleFinto(), TerminaleFinto(), False),
+    ("WARNING", io.StringIO(), TerminaleFinto(), False),
+    ("WARNING", TerminaleFinto(), io.StringIO(), False),
+    ("WARNING", TerminaleFinto(), TerminaleFinto(), True),
+    ("ERROR", TerminaleFinto(), TerminaleFinto(), True),
+])
+def test_scelta_dell_indicatore(livello, ingresso, uscita, atteso):
+    assert isinstance(crea_indicatore_attesa(livello, ingresso, uscita), IndicatoreAttesa) is atteso
+```
+
+- [ ] **Step 2:** pytest → FAIL. **Step 3:** implementare. **Step 4:** pytest completo → PASS (i test
+  esistenti di `test_cli.py` restano invariati).
+- [ ] **Step 5: Prova manuale eseguita da Claude**, con l'input da pipe in modalità silenziosa:
+
+```powershell
+$env:LOG_LEVEL = "WARNING"
+"Che ore sono?`n/esci" | .\.venv\Scripts\python.exe -m assistente
+Remove-Item Env:LOG_LEVEL
+```
+
+  → solo `Tu> Assistente> ...` e `Tu> Alla prossima!`, nessun `Ragionando...`: output identico a prima del
+  task. L'aspetto nella chat da tastiera (scritta che compare e sparisce, anche con Ctrl+C durante l'attesa)
+  Claude non può vederlo: va indicato all'utente come prova manuale.
+- [ ] **Step 6: README** — nelle due modalità di log: con `WARNING`, solo nella chat interattiva da tastiera,
+  durante l'attesa compare `Ragionando...`, che sparisce all'arrivo della risposta; con l'input da pipe non
+  compare.
+- [ ] **Step 7: Commit** `feat(cli): mostra «Ragionando...» durante l'attesa in modalità silenziosa`.
+
 ### Task 7: Docker Compose
 
 **Files:**
@@ -505,7 +742,8 @@ def test_risposta_con_testo_e_richiesta_va_agli_strumenti():
   → stessa ora (in UTC).
 - [ ] **Step 5: Consegna all'utente — demo interattiva**: l'utente esegue
   `docker compose run --rm --name assistente-demo assistente` (due turni, due domande sull'ora, una su un'altra
-  città) e da un secondo terminale `docker logs -f assistente-demo`, e riporta l'esito. Il commit aspetta l'esito.
+  città) e da un secondo terminale `docker logs -f assistente-demo`, e riporta l'esito. Nella stessa demo prova
+  anche la scritta «Ragionando...» con `LOG_LEVEL=WARNING` (Task 6B). Il commit aspetta l'esito.
 - [ ] **Step 6: README** — avvio con Compose, `run` invece di `up`, diagnosi (slide 17, indirizzo di ascolto,
   firewall, orologio della VM).
 - [ ] **Step 7: Commit** `feat(docker): avvia l'assistente con Docker Compose verso LM Studio sull'host`.
@@ -516,7 +754,7 @@ def test_risposta_con_testo_e_richiesta_va_agli_strumenti():
 - Modify: `README.md`, `CLAUDE.md`
 
 - [ ] **Step 1:** `.\.venv\Scripts\python.exe -m pytest -v` → tutti verdi, nessun test `reale` eseguito.
-- [ ] **Step 2:** `.\.venv\Scripts\python.exe -m pytest -m reale -v` → 3 passed (LM Studio attivo).
+- [ ] **Step 2:** `.\.venv\Scripts\python.exe -m pytest -m reale -v` → 4 passed (LM Studio attivo).
 - [ ] **Step 3:** confronto requisito per requisito con la specifica (obiettivi 1–5, tabella dei casi limite);
   ogni scostamento va all'utente.
 - [ ] **Step 4:** README rivisto: ogni comando presente è stato eseguito in questo piano; aggiunta la checklist

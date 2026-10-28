@@ -1,6 +1,8 @@
 # Assistente del laboratorio — specifica di design (Lezione 4)
 
 > Stato: approvata dall'utente il 26/10/2026, al termine del brainstorming con Superpowers.
+> Aggiornata il 28/10/2026 con la proposta approvata dall'utente: fuso facoltativo nello strumento orologio
+> e scritta «Ragionando...» durante l'attesa in modalità silenziosa.
 
 ## Intento e perché
 Applicazione Python da terminale che conversa con un modello locale servito da LM Studio, con il flusso
@@ -48,12 +50,18 @@ elencate nel piano e approvate prima dell'installazione. Il CLAUDE.md del proget
   temperatura 0): domanda sull'ora → `tool_calls` strutturato `ora_corrente` con argomenti `{}`; dopo il
   risultato la risposta usa l'ora ricevuta ma **inventa il giorno della settimana** («sabato» invece di
   lunedì); domanda ordinaria → nessuna chiamata. Da qui le contromisure su risultato e prompt (sotto).
-- Orologio senza parametri; fuso IANA fisso da variabile d'ambiente, validato all'avvio.
+- Orologio con un parametro facoltativo `fuso` (nome IANA). Senza parametro usa il fuso configurato da
+  variabile d'ambiente, validato all'avvio; con il parametro calcola l'ora di un'altra località.
+  Decisione del 28/10/2026: sostituisce l'orologio senza parametri, dopo che il modello ha indicato le 4:00 a
+  New York quando erano le 5:00 (in quella settimana Roma e New York distano 5 ore invece di 6).
 - Log dei passaggi: due modalità tramite `LOG_LEVEL` — `INFO` (default, passaggi visibili) e `WARNING`
-  (solo dialogo). Nessun comando in chat per cambiarle.
+  (solo dialogo). Nessun comando in chat per cambiarle. In modalità silenziosa, solo nella chat interattiva,
+  durante l'attesa compare la scritta fissa «Ragionando...», cancellata all'arrivo della risposta
+  (decisione del 28/10/2026).
 - Risposta mostrata tutta insieme (niente streaming).
-- Ora di un'altra città: il modello chiama l'orologio e converte da sé a partire dall'ora locale.
-  Scelta dell'utente; il risultato della conversione non è verificabile dai test automatici (vedi Rischi).
+- Ora di un'altra città: il modello chiama l'orologio con il fuso IANA della città e il programma calcola
+  l'ora con le regole dell'ora legale di `tzdata`; il modello usa il risultato senza convertire da sé.
+  Decisione del 28/10/2026, che sostituisce la conversione fatta dal modello.
 - Controllo all'avvio: l'app interroga `GET {LMSTUDIO_BASE_URL}/models`; se LM Studio non risponde o il
   modello configurato non è nell'elenco, non parte e mostra l'URL usato e i modelli disponibili.
 - Dipendenze: `langgraph`, `langchain-openai` (ChatOpenAI con `base_url` verso LM Studio), `tzdata`
@@ -71,10 +79,10 @@ Pacchetto `assistente/` nella radice del progetto, avviato con `python -m assist
 | Modulo | Responsabilità |
 |---|---|
 | `config.py` | Legge e valida le variabili d'ambiente (carica `.env` se presente, senza sovrascrivere variabili già impostate); errore chiaro se mancano URL o modello o se il fuso non è valido |
-| `strumenti.py` | Strumento `ora_corrente`, costruito con fuso e sorgente dell'istante iniettabili |
+| `strumenti.py` | Strumento `ora_corrente` con parametro facoltativo `fuso`, costruito con fuso configurato e sorgente dell'istante iniettabili |
 | `modello.py` | Crea il `ChatOpenAI` puntato a LM Studio dalla configurazione (temperatura 0); controllo all'avvio dell'elenco modelli con la libreria standard (`urllib`), separando la lettura HTTP dalla verifica dell'elenco così che la verifica sia testabile senza rete |
 | `grafo.py` | Stato, nodi, instradamento; `costruisci_grafo(modello, strumenti)` riceve il modello dall'esterno |
-| `cli.py` / `__main__.py` | Ciclo di chat, cronologia di sessione, stampa, gestione errori, configurazione dei log |
+| `cli.py` / `__main__.py` | Ciclo di chat, cronologia di sessione, stampa, gestione errori, configurazione dei log, scritta di attesa in modalità silenziosa |
 
 ### Grafo
 - **Stato**: `messages: Annotated[list, add_messages]` (aggiunge, non sostituisce).
@@ -91,9 +99,9 @@ Pacchetto `assistente/` nella radice del progetto, avviato con `python -m assist
 ### Prompt di sistema (requisiti; testo esatto al builder)
 In italiano. Deve dire: per ora, data o giorno attuali chiamare **sempre** `ora_corrente`, anche se nella
 conversazione c'è già un risultato precedente (è superato); non dedurre informazioni temporali che il
-risultato non contiene; per l'ora di un'altra città, chiamare l'orologio e convertire dall'ora locale,
-indicando nella risposta anche l'ora locale di partenza (così l'utente può controllare il calcolo);
-rispondere in italiano.
+risultato non contiene; per l'ora di un'altra città, chiamare `ora_corrente` con il fuso IANA della città
+(per esempio `America/New_York`) e usare il risultato così com'è, senza convertire da sé; rispondere in
+italiano.
 
 ### Cronologia
 La CLI tiene in memoria la lista dei messaggi; a ogni turno invoca il grafo con cronologia + nuovo
@@ -106,10 +114,10 @@ possono influenzare i turni successivi: si limitano alla fonte (risultato comple
 | Parte | Decisione |
 |---|---|
 | Nome | `ora_corrente` |
-| Descrizione | Restituisce data, giorno della settimana e ora correnti nel fuso orario configurato; da usare per ogni domanda su ora, data o giorno attuali |
-| Parametri | Nessuno |
-| Risultato | `<giorno in italiano> AAAA-MM-GGTHH:MM:SS±HH:MM (Fuso/IANA)`, es. `lunedì 2026-10-26T16:42:10+01:00 (Europe/Rome)`; nomi dei giorni da tabella fissa nel codice, non dal locale di sistema |
-| Errori | Fuso non valido rilevato all'avvio in `config.py` → l'app non parte e lo spiega |
+| Descrizione | Restituisce data, giorno della settimana e ora correnti: senza argomenti nel fuso orario configurato, con `fuso` nel fuso di un'altra località; da usare per ogni domanda su ora, data o giorno attuali |
+| Parametri | `fuso`, facoltativo: nome IANA della località, per esempio `America/New_York`, con una descrizione visibile al modello (data con `Annotated`, senza importare `pydantic`). Assente, nullo o vuoto → fuso configurato (`APP_TIMEZONE`) |
+| Risultato | `<giorno in italiano> AAAA-MM-GGTHH:MM:SS±HH:MM (Fuso/IANA)`, es. `lunedì 2026-10-26T16:42:10+01:00 (Europe/Rome)` oppure `mercoledì 2026-10-28T04:56:00-04:00 (America/New_York)`; stesso formato per ogni fuso; nomi dei giorni da tabella fissa nel codice, non dal locale di sistema |
+| Errori | Fuso configurato non valido: rilevato all'avvio in `config.py` → l'app non parte e lo spiega. Fuso richiesto dal modello non valido (es. `New York`, o un valore che non è un testo): nessuna eccezione, il risultato è un testo d'errore che il modello legge e può correggere, es. `Errore: fuso orario sconosciuto «New York»: serve un nome IANA, per esempio America/New_York` |
 
 ### Configurazione
 | Variabile | Esempio (`.env.example`) | Note |
@@ -117,7 +125,7 @@ possono influenzare i turni successivi: si limitano alla fonte (risultato comple
 | `LMSTUDIO_BASE_URL` | `http://localhost:1234/v1` | Compose la sovrascrive con `http://host.docker.internal:1234/v1` |
 | `LMSTUDIO_MODEL` | `google/gemma-4-e4b` | Obbligatoria; deve coincidere con `GET /v1/models` |
 | `APP_TIMEZONE` | `Europe/Rome` | Obbligatoria; nel container non si deduce dall'host |
-| `LOG_LEVEL` | `INFO` | `INFO` = passaggi visibili; `WARNING` = solo dialogo |
+| `LOG_LEVEL` | `INFO` | `INFO` = passaggi visibili; `WARNING` = solo dialogo, con «Ragionando...» durante l'attesa nella chat interattiva |
 La chiave API non serve a LM Studio: si passa un segnaposto fisso nel codice, nessuna credenziale.
 
 ### Terminale
@@ -126,6 +134,12 @@ con `docker logs -f`). Errori stampati dalla CLI, quindi visibili in entrambe le
 `/esci`, Ctrl+C o fine input chiudono la sessione con un saluto. Input vuoto ignorato.
 Errori di connessione/timeout verso LM Studio o modello non trovato: messaggio riconoscibile con l'URL
 usato, nessuna risposta inventata, turno scartato, chat che continua.
+
+Scritta di attesa: quando `LOG_LEVEL` nasconde gli `INFO` (`WARNING` o `ERROR`) e sia l'ingresso sia l'uscita
+sono un terminale, la CLI scrive `Ragionando...` su stdout, senza andare a capo, subito prima di ogni turno
+inviato al modello, e la cancella esattamente (backspace, spazi, backspace) prima di stampare la risposta,
+l'errore o il saluto, anche dopo Ctrl+C. Righe vuote e comandi non la mostrano. Con l'input da pipe (test,
+esempi del README, `docker compose run -T`) o in modalità `INFO` l'output resta quello di sempre.
 
 Esempio in modalità `INFO`:
 ```
@@ -160,6 +174,10 @@ Ogni caso ha un comportamento definito e, dove indicato, un test automatico.
 | Primo caricamento del modello in LM Studio lento (decine di secondi) | Timeout di connessione breve (~5 s, per accorgersi subito del server spento) ma timeout di lettura lungo (~180 s); tentativi automatici del client al massimo 1 | — (prova reale) |
 | Risposta del modello vuota, o richiesta di strumento malformata (`invalid_tool_calls`) | Messaggio «il modello non ha prodotto una risposta valida», log WARNING, turno scartato | sì |
 | Strumento richiesto con argomenti inattesi (es. `{"timezone": ...}`) | Argomenti ignorati e registrati a WARNING; lo strumento restituisce comunque l'ora del fuso configurato; nessun crash | sì |
+| Strumento richiesto con `fuso` assente, nullo o vuoto | Ora del fuso configurato | sì |
+| Strumento richiesto con un `fuso` non valido (`New York`, un numero) | Nessuna eccezione: il risultato è il testo d'errore del contratto, il modello può riprovare | sì |
+| Modalità silenziosa con input da pipe o uscita non da terminale | Nessuna scritta di attesa: output identico a quello senza scritta | sì (scelta dell'indicatore) |
+| Errore del modello o Ctrl+C mentre la scritta di attesa è visibile | Scritta cancellata prima del messaggio d'errore o del saluto | sì |
 | Più richieste di strumento nella stessa risposta | Tutte eseguite, ciascuna con il proprio `tool_call_id` | sì |
 | Contesto del modello esaurito (sessione lunga) | Errore restituito da LM Studio mostrato come errore riconoscibile, turno scartato; README spiega come aumentare la lunghezza di contesto in LM Studio e che la sua politica di overflow può tagliare messaggi in silenzio | — |
 | Log di librerie esterne (httpx, openai) | Solo i logger dell'applicazione seguono `LOG_LEVEL`; quelli esterni restano a WARNING, così la modalità INFO mostra solo i passaggi del grafo | sì |
@@ -174,16 +192,22 @@ Ogni caso ha un comportamento definito e, dove indicato, un test automatico.
 **Limiti accettati (non coperti):** il modello può scrivere nel testo qualcosa che imita una richiesta di
 strumento invece di una richiesta strutturata (lo rilevano le prove reali, non si interpreta il testo); un
 incolla su più righe produce più turni; il contenuto delle risposte può essere sbagliato anche quando il
-flusso è corretto.
+flusso è corretto; in modalità silenziosa un raro avviso (WARNING) stampato durante l'attesa può lasciare
+«Ragionando...» a schermo accanto all'avviso (difetto solo estetico).
 
 ## Test
 **Automatici (pytest, nessun modello attivo)** — eseguiti con `python -m pytest`:
 - strumento con istante controllato: valore atteso esatto, giorno della settimana incluso; fuso diverso →
-  offset corretto (anche a cavallo del cambio d'ora);
+  offset corretto (anche a cavallo del cambio d'ora); parametro `fuso` (New York e Tokyo, assente, vuoto,
+  non valido) e sua presenza nello schema dello strumento;
 - configurazione: fuso non valido / modello mancante → errore;
 - grafo con modello finto a risposte predefinite: percorso senza strumento (una chiamata, fine); percorso
   con strumento (llm → strumenti → llm, `ToolMessage` con `tool_call_id` giusto, funzione davvero eseguita);
-  modello che chiede sempre lo strumento → limite di passaggi;
+  modello che chiede sempre lo strumento → limite di passaggi; richiesta con `{"fuso": ...}` che arriva allo
+  strumento senza avvisi;
+- scritta di attesa: ordine mostra → nascondi → risposta (anche con errore e Ctrl+C), nessuna scritta per
+  righe vuote e comandi, testo scritto e cancellato esattamente, scelta dell'indicatore secondo livello di
+  log e terminale;
 - cronologia: due turni → domande e risposte nell'ordine giusto, senza duplicati; errore del modello →
   cronologia invariata;
 - log: richiesta e risultato dello strumento presenti a `INFO`, assenti a `WARNING` (`caplog`).
@@ -191,10 +215,12 @@ flusso è corretto.
 **Reali (attivati esplicitamente, esclusi di default)** — marcatore pytest `reale`, eseguiti con
 `python -m pytest -m reale` con LM Studio attivo: una domanda ordinaria riceve risposta senza strumento;
 una domanda sull'ora produce un `ToolMessage` di `ora_corrente`; una seconda domanda sull'ora nella stessa
-sessione produce una seconda chiamata. Se il modello non chiama lo strumento il test fallisce e lo si
+sessione produce una seconda chiamata; «Che ore sono a New York?» produce un `ToolMessage` di `ora_corrente`
+calcolato nel fuso `America/New_York`. Se il modello non chiama lo strumento il test fallisce e lo si
 riporta: non si sostituisce con risposte simulate. La prova Docker è una checklist manuale nel README
 (build, run, conversazione a due turni, due domande sull'ora, giorno della settimana corretto, una domanda
-sull'ora di un'altra città con controllo manuale della conversione, `docker logs -f`).
+sull'ora di un'altra città con controllo del fuso richiesto nel log, `docker logs -f`). L'aspetto della
+scritta «Ragionando...» nella chat da tastiera si verifica a mano.
 
 ## Documentazione
 README: requisiti, configurazione (`.env` da `.env.example`, verifica del modello con
@@ -206,15 +232,16 @@ effettivamente eseguiti. CLAUDE.md aggiornato con struttura e comandi di test qu
 - Mie: cronologia nella CLI senza checkpointer; `recursion_limit` 10; formato del risultato dell'orologio con
   giorno della settimana; test reali come marcatore pytest; temperatura 0; `requirements-dev.txt` separato.
 - Mie anche: valori dei timeout e gestione dei casi limite della tabella sopra.
+- Mie, del 28/10/2026: `fuso` nullo trattato come assente; un `fuso` che non è un testo gestito come fuso non
+  valido; la scelta dell'indicatore di attesa in una piccola funzione di `cli.py`, testabile con stream finti.
 - Al builder: testo del prompt di sistema (nel rispetto dei requisiti sopra), nomi interni, forma esatta
   del modello finto; versioni esatte proposte nel piano.
 
 ## Rischi aperti
 - Il modello può comunque sbagliare dati non forniti dallo strumento o riusare risultati vecchi: le prove
   reali con due domande sull'ora servono a misurarlo.
-- Conversioni verso altri fusi fatte dal modello: possono sbagliare quando le due città hanno regole di ora
-  legale diverse o quando la conversione cambia giorno; la risposta riporta l'ora locale di partenza per
-  permettere il controllo.
+- Ora di altre città: il calcolo è del programma, ma il modello può scegliere un fuso sbagliato o non passarlo.
+  Si vede nel log (argomenti della richiesta) e nel risultato (nome del fuso); il test reale su New York lo misura.
 - Raggiungibilità di LM Studio dal container non ancora provata; Docker Desktop al momento è spento.
 
 ## Passi dopo l'approvazione
