@@ -186,7 +186,7 @@ Ogni caso ha un comportamento definito e, dove indicato, un test automatico.
 | Caso | Comportamento | Test |
 |---|---|---|
 | LM Studio spento all'avvio, o modello configurato assente | L'app non parte: messaggio con URL usato e modelli disponibili, codice di uscita diverso da 0 | sì (verifica dell'elenco senza rete) |
-| Primo caricamento del modello in LM Studio lento (decine di secondi) | Timeout di connessione breve (~5 s, per accorgersi subito del server spento) ma timeout di lettura lungo (~180 s); tentativi automatici del client al massimo 1 | — (prova reale) |
+| Primo caricamento del modello in LM Studio lento (decine di secondi) | Un solo timeout di 180 s per le chiamate al modello (un server spento rifiuta subito la connessione, e all'avvio lo rileva già il controllo dell'elenco modelli con timeout di 5 s); tentativi automatici del client al massimo 1 | — (prova reale) |
 | Risposta del modello vuota, o richiesta di strumento malformata (`invalid_tool_calls`) | Messaggio «il modello non ha prodotto una risposta valida», log WARNING, turno scartato | sì |
 | Strumento richiesto con argomenti inattesi (es. `{"timezone": ...}`) | Argomenti ignorati e registrati a WARNING; lo strumento restituisce comunque l'ora del fuso configurato; nessun crash | sì |
 | Strumento richiesto con `fuso` assente, nullo o vuoto | Ora del fuso configurato | sì |
