@@ -55,6 +55,8 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   `.\.venv\Scripts\python.exe -m pytest -m reale -v`.
 - Docker: `docker compose build`, poi `docker compose run --rm --name assistente-demo assistente`
   (si usa `run`, non `up`; con input da pipe `docker compose run --rm -T assistente`).
+  La chat interattiva nel container (tastiera, `docker logs -f assistente-demo` da un secondo terminale) è una
+  prova manuale: vedi la checklist del README.
 
 ## Metodo: Superpowers
 - Usare le skill di Superpowers per brainstorming, specifica, piano, implementazione e verifica.

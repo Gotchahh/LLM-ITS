@@ -6,6 +6,8 @@ cronologia per la durata della sessione (nessuna persistenza). Il modello può c
 strumento orologio `ora_corrente`, che il programma esegue davvero.
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
+Gli esempi di output riportati sono di esecuzioni reali del 28/10/2026: orari e offset (per esempio `-04:00`, EDT)
+cambiano con la data.
 
 ## Requisiti
 
@@ -98,6 +100,7 @@ precedente, due domande sull'ora nella stessa sessione (due richieste di `ora_co
 di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`).
 Con un modello locale possono richiedere diversi minuti (ogni prova fa più chiamate al modello e la prima carica
 il modello). Se il modello non chiama lo strumento la prova fallisce: il fallimento va riportato, non aggirato.
+
 ## Avvio
 
 LM Studio deve avere il server locale avviato e il modello di `LMSTUDIO_MODEL` disponibile. Dalla cartella
@@ -342,11 +345,12 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
   `Errore: Il modello «...» non è disponibile in LM Studio. Modelli disponibili: ...` e codice 1. Copiare in
   `LMSTUDIO_MODEL` uno degli identificativi elencati. Provato con `LMSTUDIO_MODEL=modello-inesistente`.
 - **Il server si ferma durante la chat**, o una richiesta supera il timeout (180 s, con un solo nuovo
-  tentativo): il programma è fatto per stampare
+  tentativo): il programma stampa
   `Errore: nessuna risposta valida da LM Studio (<indirizzo>): <Classe>: <dettaglio>. Turno annullato.`,
-  scartare il turno (domanda e risposta non entrano nella cronologia) e proseguire. *Non provato con il modello
-  reale* (non si è fermato LM Studio durante la chat): il comportamento è verificato solo dai test automatici
-  con un modello finto. Con `LOG_LEVEL=DEBUG` si ottiene il traceback completo nel log.
+  scartare il turno (domanda e risposta non entrano nella cronologia) e proseguire. Il 28/10/2026 l'utente ha provato a mano
+  a fermare LM Studio a metà chat e a riavviarlo e, secondo il suo resoconto sintetico, ha funzionato; non l'ho
+  ripetuto nella verifica finale. Il timeout (180 s) *non è stato provato*: lo coprono solo i test automatici con
+  un modello finto. Con `LOG_LEVEL=DEBUG` si ottiene il traceback completo nel log.
 - **Contesto esaurito** (sessione lunga): *non provato*. La cronologia cresce senza tagli per tutta la sessione.
   Se LM Studio rifiuta la richiesta, l'errore dovrebbe comparire con lo stesso messaggio del punto precedente; in
   quel caso conviene uscire con `/esci` e riavviare. Aumentare la lunghezza di contesto nelle impostazioni di
@@ -366,7 +370,7 @@ Con Docker Compose (sintomo, primo controllo):
   solo `Attaching to assistente-1` e il comando non termina. Si ferma e si rimuove con `docker compose down`. Per chattare usare `docker compose run`.
 - **Il container termina subito, con codice 1**: l'errore di avvio compare nell'output del terminale (per esempio
   server o modello non disponibili, come nelle prime due voci). Provato con `LMSTUDIO_BASE_URL` sbagliata (vedi
-  la voce successiva).
+  la voce «Nessuna connessione al modello»).
 - **`docker compose` si lamenta di un file `.env` non trovato**: il file indicato da `env_file` deve esistere.
   Provato in una copia temporanea del progetto senza `.env`: `docker compose config` e `docker compose run` terminano
   con codice 1 e `env file ...\.env not found: CreateFile ...\.env: The system cannot find the file specified.`
