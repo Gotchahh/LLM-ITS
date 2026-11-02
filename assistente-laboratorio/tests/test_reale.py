@@ -36,11 +36,19 @@ def test_reale_cronologia(grafo):
     assert "verde" in cronologia[-1].text.lower()
 
 
+def nomi_strumenti(cronologia):
+    """Nomi degli strumenti eseguiti nella cronologia, nell'ordine."""
+    return [m.name for m in cronologia if m.type == "tool"]
+
+
 def test_reale_due_domande_sull_ora(grafo):
+    # Il modello può chiamare l'orologio più di una volta nello stesso turno: ne serve almeno una per turno.
     primo = esegui_turno(grafo, [], "Che ore sono?")
-    assert [m.name for m in primo if m.type == "tool"] == ["ora_corrente"]
+    dopo_il_primo = nomi_strumenti(primo)
+    assert dopo_il_primo and set(dopo_il_primo) == {"ora_corrente"}
     secondo = esegui_turno(grafo, primo, "E adesso che ore sono?")
-    assert [m.name for m in secondo if m.type == "tool"] == ["ora_corrente", "ora_corrente"]
+    dopo_il_secondo = nomi_strumenti(secondo)
+    assert set(dopo_il_secondo) == {"ora_corrente"} and len(dopo_il_secondo) > len(dopo_il_primo)
 
 
 def test_reale_ora_di_un_altra_citta(grafo):

@@ -100,7 +100,8 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 ```
 
 Sono quattro prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
-precedente, due domande sull'ora nella stessa sessione (due richieste di `ora_corrente`, una per turno) e l'ora
+precedente, due domande sull'ora nella stessa sessione (almeno una richiesta di `ora_corrente` per turno: il modello può
+chiamarla più volte nello stesso turno) e l'ora
 di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`).
 Con un modello locale possono richiedere diversi minuti (ogni prova fa più chiamate al modello e la prima carica
 il modello). Se il modello non chiama lo strumento la prova fallisce: il fallimento va riportato, non aggirato.
