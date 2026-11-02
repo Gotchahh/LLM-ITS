@@ -8,7 +8,8 @@ strumento orologio `ora_corrente`, che il programma esegue davvero.
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
 in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
-mancante sono del 02/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
+mancante sono del 02/11/2026; riprovati lo stesso giorno, con lo stesso esito, anche i messaggi d'errore della
+Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -348,8 +349,8 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
 - **Il server si ferma durante la chat**, o una richiesta supera il timeout (180 s, con un solo nuovo
   tentativo): il programma stampa
   `Errore: nessuna risposta valida da LM Studio (<indirizzo>): <Classe>: <dettaglio>. Turno annullato.`,
-  scartare il turno (domanda e risposta non entrano nella cronologia) e proseguire. Il 28/10/2026 l'utente ha provato a mano
-  a fermare LM Studio a metà chat e a riavviarlo e, secondo il suo resoconto sintetico, ha funzionato; non l'ho
+  scarta il turno (domanda e risposta non entrano nella cronologia) e prosegue. Il 28/10/2026 l'utente ha provato a mano
+  a fermare LM Studio a metà chat e a riavviarlo e, secondo il suo resoconto sintetico, ha funzionato; non
   ripetuto nella verifica finale. Il timeout (180 s) *non è stato provato*: lo coprono solo i test automatici con
   un modello finto. Con `LOG_LEVEL=DEBUG` si ottiene il traceback completo nel log.
 - **Contesto esaurito** (sessione lunga): *non provato*. La cronologia cresce senza tagli per tutta la sessione.
