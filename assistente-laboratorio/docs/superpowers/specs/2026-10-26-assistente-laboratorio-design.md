@@ -204,7 +204,7 @@ Ogni caso ha un comportamento definito e, dove indicato, un test automatico.
 | Test eseguiti sul PC dello sviluppatore con un `.env` reale | `load_dotenv` chiamato solo all'avvio dell'app, non all'import: i test passano la configurazione in modo esplicito e non dipendono dal `.env`, dall'orologio reale o dalla rete | sì |
 | Comandi scritti in modo diverso (`/ESCI`, ` /esci `) o sconosciuti (`/aiuto`) | Normalizzati; un comando sconosciuto mostra un suggerimento e non viene inviato al modello | sì |
 | Ctrl+C durante l'attesa della risposta | Uscita pulita con saluto, senza traceback | sì |
-| Container avviato con `docker compose up` invece di `run` | Senza input interattivo l'app termina: il README indica `docker compose run` e spiega il sintomo | — |
+| Container avviato con `docker compose up` invece di `run` | Il container resta `Up` in attesa di un input che nessuno può digitare, senza output nei log (osservato sia con `docker compose up -d` sia con `docker compose up`): il README indica `docker compose run`, spiega il sintomo e come fermarlo con `docker compose down` (verificato il 02/11/2026) | — |
 | Orologio della VM di Docker Desktop in ritardo dopo la sospensione del PC (noto con WSL2) | Diagnosi nel README: confronto tra l'ora dell'host e `docker run --rm python:3.14.7-slim date` | — |
 
 **Limiti accettati (non coperti):** il modello può scrivere nel testo qualcosa che imita una richiesta di
