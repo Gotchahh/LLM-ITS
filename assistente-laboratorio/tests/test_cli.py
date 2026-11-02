@@ -69,6 +69,14 @@ def test_messaggio_dell_errore_generico_con_classe_e_dettaglio():
                          "TimeoutError: Request timed out. Turno annullato.")
 
 
+def test_messaggio_dell_errore_con_punto_finale_non_raddoppia_il_punto():
+    # I messaggi del client OpenAI finiscono già con un punto («Connection error.»).
+    finto = ModelloFinto([ConnectionError("Connection error.")])
+    uscita = chat(costruisci_grafo(finto, []), ["D1"])
+    assert uscita[0] == (f"Errore: nessuna risposta valida da LM Studio ({SERVER_FINTO}): "
+                         "ConnectionError: Connection error. Turno annullato.")
+
+
 def test_errore_generico_con_traceback_nel_log_di_debug(caplog):
     caplog.set_level(logging.DEBUG, logger="assistente")
     chat(costruisci_grafo(ModelloFinto([ConnectionError("Connection refused")]), []), ["D1"])

@@ -104,9 +104,10 @@ def esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None,
                 scrivi("Errore: il modello non ha prodotto una risposta valida. Turno annullato.")
             except Exception as errore:
                 logger.debug("Dettaglio dell'errore del turno", exc_info=True)
+                dettaglio = str(errore).removesuffix(".")   # i messaggi del client finiscono già con un punto
                 scrivi(
                     f"Errore: nessuna risposta valida da LM Studio ({server}): "
-                    f"{type(errore).__name__}: {errore}. Turno annullato."
+                    f"{type(errore).__name__}: {dettaglio}. Turno annullato."
                 )
             else:
                 scrivi(f"Assistente> {cronologia[-1].text}")
