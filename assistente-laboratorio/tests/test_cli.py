@@ -82,8 +82,11 @@ def test_risposta_non_valida_del_modello():
 
 
 def test_ctrl_c_durante_il_turno():                                    # Review Focus 2
-    uscita = chat(costruisci_grafo(ModelloFinto([KeyboardInterrupt()]), []), ["D1"])
-    assert uscita[-1] == "Alla prossima!"
+    # Due righe in ingresso: se Ctrl+C venisse ignorato, la chat leggerebbe D2 e chiamerebbe il modello.
+    finto = ModelloFinto([KeyboardInterrupt(), AIMessage("R2")])
+    uscita = chat(costruisci_grafo(finto, []), ["D1", "D2"])
+    assert uscita == ["Alla prossima!"]
+    assert len(finto.chiamate) == 1
 
 
 def test_fine_input():
@@ -110,9 +113,10 @@ def test_attesa_nascosta_prima_dell_errore():
 
 
 def test_attesa_nascosta_prima_del_saluto_dopo_ctrl_c():
-    finto = ModelloFinto([KeyboardInterrupt()])
-    uscita = chat(costruisci_grafo(finto, []), ["D1"], con_attesa=True, livello_log="WARNING")
+    finto = ModelloFinto([KeyboardInterrupt(), AIMessage("R2")])
+    uscita = chat(costruisci_grafo(finto, []), ["D1", "D2"], con_attesa=True, livello_log="WARNING")
     assert uscita == ["[mostra]", "[nascondi]", "Alla prossima!"]
+    assert len(finto.chiamate) == 1
 
 
 def test_righe_vuote_e_comandi_senza_attesa():
