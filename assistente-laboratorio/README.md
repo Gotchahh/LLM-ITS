@@ -6,8 +6,9 @@ cronologia per la durata della sessione (nessuna persistenza). Il modello può c
 strumento orologio `ora_corrente`, che il programma esegue davvero.
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
-Gli esempi di output riportati sono di esecuzioni reali del 28/10/2026: orari e offset (per esempio `-04:00`, EDT)
-cambiano con la data.
+Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
+in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
+mancante sono del 02/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -372,7 +373,7 @@ Con Docker Compose (sintomo, primo controllo):
   server o modello non disponibili, come nelle prime due voci). Provato con `LMSTUDIO_BASE_URL` sbagliata (vedi
   la voce «Nessuna connessione al modello»).
 - **`docker compose` si lamenta di un file `.env` non trovato**: il file indicato da `env_file` deve esistere.
-  Provato in una copia temporanea del progetto senza `.env`: `docker compose config` e `docker compose run` terminano
+  Provato il 02/11/2026 in una copia temporanea del progetto senza `.env`: `docker compose config` e `docker compose run` terminano
   con codice 1 e `env file ...\.env not found: CreateFile ...\.env: The system cannot find the file specified.`
   Creare il file come in «Configurazione» (`Copy-Item .env.example .env`).
 - **Nessuna connessione al modello**: controllare in ordine il server di LM Studio (avviato, modello caricato),
