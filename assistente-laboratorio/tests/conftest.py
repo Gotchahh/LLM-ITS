@@ -1,5 +1,6 @@
 """Valori e aiuti condivisi dai test."""
 
+import io
 import logging
 
 import pytest
@@ -19,6 +20,21 @@ def livello_log_app_ripristinato():
     livello = logger_app.level
     yield
     logger_app.setLevel(livello)
+
+
+class FlussoDiTesto(io.TextIOWrapper):
+    """Flusso di testo su byte, con la codifica cp1252 che Windows usa per pipe e file.
+
+    `contenuto` sono i byte da leggere; dopo le scritture i byte emessi sono in `buffer.getvalue()`.
+    Con `interattivo=True` si dichiara un terminale.
+    """
+
+    def __init__(self, contenuto: bytes = b"", interattivo: bool = False):
+        super().__init__(io.BytesIO(contenuto), encoding="cp1252", errors="strict", newline="\n")
+        self.interattivo = interattivo
+
+    def isatty(self):
+        return self.interattivo
 
 
 class ModelloFinto:

@@ -2,11 +2,11 @@ import io
 import logging
 
 import pytest
-from conftest import SERVER_FINTO, ModelloFinto, chat
+from conftest import SERVER_FINTO, FlussoDiTesto, ModelloFinto, chat
 from langchain_core.messages import AIMessage
 from langgraph.errors import GraphRecursionError
 
-from assistente.cli import IndicatoreAttesa, crea_indicatore_attesa
+from assistente.cli import IndicatoreAttesa, crea_indicatore_attesa, prepara_terminale
 from assistente.grafo import costruisci_grafo
 
 
@@ -19,6 +19,13 @@ def test_righe_vuote_e_spazi_ignorati():                              # Review F
 def test_bom_iniziale_dell_input_da_pipe_non_rompe_riga_vuota_e_comando():
     finto = ModelloFinto([])
     uscita = chat(costruisci_grafo(finto, []), ["\ufeff   ", "\ufeff/esci"])
+    assert finto.chiamate == [] and uscita == ["Alla prossima!"]
+
+
+def test_piu_bom_iniziali_non_rompono_riga_vuota_e_comando():
+    # La pipe di PowerShell 5.1 può anteporre due BOM (uno dell'encoding di $OutputEncoding, uno della console).
+    finto = ModelloFinto([])
+    uscita = chat(costruisci_grafo(finto, []), ["\ufeff\ufeff   ", "\ufeff\ufeff/esci"])
     assert finto.chiamate == [] and uscita == ["Alla prossima!"]
 
 
@@ -148,6 +155,53 @@ def test_indicatore_non_mostrato_non_cancella_nulla():
 ])
 def test_scelta_dell_indicatore(ingresso, uscita, atteso):
     assert isinstance(crea_indicatore_attesa(ingresso, uscita), IndicatoreAttesa) is atteso
+
+
+def test_ingresso_non_interattivo_letto_come_utf8():
+    # Windows decodificherebbe una pipe con la codifica ANSI (cp1252): «è» diventerebbe «Ã¨».
+    ingresso = FlussoDiTesto("Qual è il colore?\n".encode("utf-8"))
+    prepara_terminale(ingresso)
+    assert ingresso.readline() == "Qual è il colore?\n"
+
+
+def test_bom_utf8_dell_ingresso_arriva_come_un_solo_carattere_da_togliere():
+    # Letto come cp1252 il BOM sarebbe «ï»¿», che la chat non riconosce e non toglie.
+    ingresso = FlussoDiTesto(b"\xef\xbb\xbf/esci\n")
+    prepara_terminale(ingresso)
+    assert ingresso.readline() == "\ufeff/esci\n"
+
+
+def test_byte_non_utf8_nell_ingresso_non_interrompono_la_lettura():
+    ingresso = FlussoDiTesto(b"caff\xe8\nsecondo\n")
+    prepara_terminale(ingresso)
+    assert ingresso.readlines() == ["caff\ufffd\n", "secondo\n"]
+
+
+def test_uscita_non_interattiva_scrive_utf8_anche_fuori_da_cp1252():
+    uscita = FlussoDiTesto()
+    prepara_terminale(uscita)
+    print("Assistente> sole \U0001F31E, caffè", file=uscita, flush=True)
+    assert uscita.buffer.getvalue() == "Assistente> sole \U0001F31E, caffè\n".encode("utf-8")
+
+
+def test_carattere_non_codificabile_nell_uscita_diventa_punto_interrogativo():
+    uscita = FlussoDiTesto()
+    prepara_terminale(uscita)
+    print("a\ud83db", file=uscita, flush=True)        # surrogato isolato: non codificabile nemmeno in UTF-8
+    assert uscita.buffer.getvalue() == b"a?b\n"
+
+
+def test_terminale_interattivo_lasciato_com_e():
+    terminale = FlussoDiTesto(interattivo=True)
+    prepara_terminale(terminale)
+    assert (terminale.encoding, terminale.errors) == ("cp1252", "strict")
+
+
+def test_ogni_flusso_e_valutato_da_solo():
+    ingresso_terminale = FlussoDiTesto(interattivo=True)
+    uscita_pipe = FlussoDiTesto()
+    prepara_terminale(ingresso_terminale, uscita_pipe)
+    assert ingresso_terminale.encoding == "cp1252" and uscita_pipe.encoding == "utf-8"
 
 
 NASCOSTI = "Log nascosti: solo dialogo. Scrivi /log per mostrarli."

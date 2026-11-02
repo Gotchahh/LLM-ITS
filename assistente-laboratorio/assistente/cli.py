@@ -46,6 +46,19 @@ def crea_indicatore_attesa(ingresso, uscita) -> IndicatoreAttesa | None:
     return None
 
 
+def prepara_terminale(*flussi) -> None:
+    """Fa usare UTF-8 ai flussi che non sono un terminale (pipe, redirect), senza errori di codifica.
+
+    Su Windows pipe e file usano la codifica ANSI (cp1252), mentre PowerShell, impostato come nel README,
+    scambia UTF-8: «è» diventerebbe «Ã¨», il BOM «ï»¿» e un'emoji nella risposta interromperebbe la sessione.
+    I byte non decodificabili in ingresso diventano U+FFFD e i caratteri non codificabili in uscita «?».
+    I terminali veri (tastiera e schermo, anche nel container) restano come sono.
+    """
+    for flusso in flussi:
+        if not flusso.isatty():
+            flusso.reconfigure(encoding="utf-8", errors="replace")
+
+
 def esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None,
                 livello_log: str = LIVELLO_LOG_PREDEFINITO) -> None:
     """Legge le righe dell'utente, esegue un turno del grafo per ciascuna e stampa la risposta.
@@ -61,8 +74,8 @@ def esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None,
     modalita_log = ModalitaLog(livello_log)
     try:
         while True:
-            # La pipe di PowerShell può anteporre un BOM (U+FEFF), che strip() non considera spazio.
-            riga = leggi("Tu> ").removeprefix("\ufeff").strip()
+            # La pipe di PowerShell può anteporre uno o due BOM (U+FEFF), che strip() non considera spazio.
+            riga = leggi("Tu> ").lstrip("\ufeff").strip()
             if not riga:
                 continue
             if riga.startswith("/"):

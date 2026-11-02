@@ -124,6 +124,19 @@ All'avvio l'applicazione controlla che il server risponda e che `LMSTUDIO_MODEL`
 restituiti da `/v1/models`; se non lo è, stampa su stderr l'errore con l'elenco dei modelli disponibili
 ed esce con codice 1.
 
+Gli esempi con l'ingresso da pipe usano lettere accentate, che Windows PowerShell 5.1 perde: il testo inviato a un
+programma viene codificato con `$OutputEncoding`, che di default è ASCII, e «è» arriva al programma (e al modello)
+come `?`. Il programma non può recuperarle. Prima delle prove da pipe si imposta UTF-8 senza BOM, in ingresso e in
+uscita, nella finestra di PowerShell corrente (in una nuova finestra va ripetuto):
+
+```powershell
+$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+```
+
+Quando l'ingresso o l'uscita non sono un terminale (pipe, `<`, `>`) il programma legge e scrive in UTF-8 e ignora i
+BOM iniziali. Con l'uscita rediretta un'emoji nella risposta del modello non interrompe più la sessione (prima
+terminava con un `UnicodeEncodeError`). Con la tastiera e lo schermo il programma non cambia nulla.
+
 Prova con tre righe in ingresso da pipe (due messaggi e il comando `/esci`):
 
 ```powershell
@@ -153,7 +166,20 @@ Una riga vuota o di soli spazi viene ignorata senza interrogare il modello:
 "   `n/esci" | .\.venv\Scripts\python.exe -m assistente
 ```
 
-stampa `Tu> Tu> Alla prossima!`.
+stampa `Tu> Tu> Alla prossima!`. Dopo `chcp 65001` PowerShell antepone un BOM al testo della pipe: il programma lo
+ignora e la riga resta vuota, con o senza la riga UTF-8 di sopra.
+
+Per conservare il dialogo in un file si redirige lo stdout; i log (stderr) restano sullo schermo:
+
+```powershell
+"Il mio colore preferito è il verde.`nQual è il mio colore preferito?`n/esci" | .\.venv\Scripts\python.exe -m assistente > chat.txt
+Get-Content chat.txt
+```
+
+`Get-Content` mostra `Tu> Assistente> ...` con accenti ed emoji intatti (il modello ne usa spesso); in PowerShell 5.1
+`>` salva il file in UTF-16. Provato il 02/11/2026 con la console predefinita (`chcp 850`) e la riga UTF-8 di sopra.
+Senza quella riga le lettere accentate di ingresso arrivano come `?` e quelle in uscita compaiono alterate
+(`├¿` al posto di `è`): è la codifica di PowerShell, non del programma.
 
 ## Strumento orologio
 

@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from assistente.cli import crea_indicatore_attesa, esegui_chat
+from assistente.cli import crea_indicatore_attesa, esegui_chat, prepara_terminale
 from assistente.config import (
     ErroreConfigurazione,
     carica_configurazione,
@@ -26,6 +26,7 @@ def main() -> int:
 
     Restituisce 1 se la configurazione non è valida o LM Studio non è raggiungibile.
     """
+    prepara_terminale(sys.stdin, sys.stdout, sys.stderr)
     ambiente = {**leggi_file_env(Path(".env")), **os.environ}
     try:
         config = carica_configurazione(ambiente)
