@@ -78,6 +78,22 @@ def test_file_env_assente(tmp_path):
     assert leggi_file_env(tmp_path / "manca.env") == {}
 
 
+@pytest.mark.parametrize("contenuto", ["LMSTUDIO_MODEL=x\n".encode("utf-16"), b"LMSTUDIO_MODEL=caff\xe8\n"],
+                         ids=["utf-16", "cp1252"])
+def test_file_env_non_utf8_errore_chiaro(tmp_path, contenuto):
+    # Il redirect `>` di PowerShell 5.1 scrive UTF-16: senza questo controllo si avrebbe un traceback.
+    f = tmp_path / ".env"
+    f.write_bytes(contenuto)
+    with pytest.raises(ErroreConfigurazione, match=r"\.env non è in UTF-8"):
+        leggi_file_env(f)
+
+
+@pytest.mark.parametrize("url", ["http://[::1/v1", "http://[abc]:1234/v1"])
+def test_url_con_parentesi_quadre_errate_rifiutato(url):
+    with pytest.raises(ErroreConfigurazione, match="LMSTUDIO_BASE_URL"):
+        carica_configurazione({**VALIDO, "LMSTUDIO_BASE_URL": url})
+
+
 def test_log_esterni_restano_a_warning(log_isolati):
     configura_log("INFO")
     assert logging.getLogger("assistente.grafo").isEnabledFor(logging.INFO)

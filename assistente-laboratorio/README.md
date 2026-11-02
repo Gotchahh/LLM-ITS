@@ -374,6 +374,15 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
 - **Il modello è assente**: l'avvio termina con
   `Errore: Il modello «...» non è disponibile in LM Studio. Modelli disponibili: ...` e codice 1. Copiare in
   `LMSTUDIO_MODEL` uno degli identificativi elencati. Provato con `LMSTUDIO_MODEL=modello-inesistente`.
+- **`.env` non è in UTF-8**: l'avvio termina con `Errore: Il file .env non è in UTF-8 ...` e codice 1. Succede se
+  il file è stato creato con `>` o `Out-File` di PowerShell 5.1, che scrivono UTF-16. Ricrearlo con
+  `Copy-Item .env.example .env`. Provato il 02/11/2026 con `"LMSTUDIO_MODEL=google/gemma-4-e4b" > .env` in una
+  cartella temporanea.
+- **`LMSTUDIO_BASE_URL` non valido** (senza schema, oppure con parentesi quadre non chiuse come `http://[::1/v1`):
+  `Errore: LMSTUDIO_BASE_URL non è un indirizzo valido: «...». Serve lo schema, per esempio http://localhost:1234/v1.`
+  e codice 1. Provato il 02/11/2026 con `http://[::1/v1`.
+- **Le lettere accentate arrivano come `?`** con l'ingresso da pipe in PowerShell 5.1: vedi «Avvio» (riga con
+  `$OutputEncoding`).
 - **Il server si ferma durante la chat**, o una richiesta supera il timeout (180 s, con un solo nuovo
   tentativo): il programma stampa
   `Errore: nessuna risposta valida da LM Studio (<indirizzo>): <Classe>: <dettaglio>. Turno annullato.`,

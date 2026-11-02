@@ -27,8 +27,8 @@ def main() -> int:
     Restituisce 1 se la configurazione non è valida o LM Studio non è raggiungibile.
     """
     prepara_terminale(sys.stdin, sys.stdout, sys.stderr)
-    ambiente = {**leggi_file_env(Path(".env")), **os.environ}
     try:
+        ambiente = {**leggi_file_env(Path(".env")), **os.environ}
         config = carica_configurazione(ambiente)
         configura_log(config.livello_log)
         verifica_modello(config.modello, leggi_modelli_disponibili(config.base_url))

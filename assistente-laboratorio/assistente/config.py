@@ -35,10 +35,19 @@ class Configurazione:
 
 
 def leggi_file_env(percorso: Path) -> dict[str, str]:
-    """Legge un file `.env` (anche con BOM e fine riga Windows); `{}` se il file non esiste."""
+    """Legge un file `.env` (anche con BOM e fine riga Windows); `{}` se il file non esiste.
+
+    Un file che non è in UTF-8 (per esempio UTF-16) solleva `ErroreConfigurazione`.
+    """
     if not percorso.is_file():
         return {}
-    valori = dotenv_values(percorso, encoding="utf-8-sig")
+    try:
+        valori = dotenv_values(percorso, encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        raise ErroreConfigurazione(
+            f"Il file {percorso} non è in UTF-8 (il redirect «>» di PowerShell 5.1 lo scrive in UTF-16). "
+            "Ricrearlo con Copy-Item .env.example .env e modificarlo con un editor che salva in UTF-8."
+        ) from None
     return {chiave: valore for chiave, valore in valori.items() if valore is not None}
 
 
@@ -57,8 +66,12 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
         )
 
     base_url = valori[VARIABILE_URL].rstrip("/")
-    indirizzo = urlparse(base_url)
-    if indirizzo.scheme not in ("http", "https") or not indirizzo.netloc:
+    try:
+        indirizzo = urlparse(base_url)
+        valido = indirizzo.scheme in ("http", "https") and bool(indirizzo.netloc)
+    except ValueError:  # per esempio parentesi quadre non chiuse, come in http://[::1/v1
+        valido = False
+    if not valido:
         raise ErroreConfigurazione(
             f"{VARIABILE_URL} non è un indirizzo valido: «{valori[VARIABILE_URL]}». "
             "Serve lo schema, per esempio http://localhost:1234/v1."

@@ -21,9 +21,12 @@ class ErroreServer(RuntimeError):
 def estrai_identificativi(corpo: bytes) -> list[str]:
     """Estrae gli identificativi (`data[].id`) dalla risposta JSON di `GET /v1/models`."""
     try:
-        return [elemento["id"] for elemento in json.loads(corpo)["data"]]
+        identificativi = [elemento["id"] for elemento in json.loads(corpo)["data"]]
     except (ValueError, KeyError, TypeError):
         raise ErroreServer("la risposta non è un elenco di modelli in formato JSON") from None
+    if not all(isinstance(identificativo, str) for identificativo in identificativi):
+        raise ErroreServer("gli identificativi dei modelli non sono testo")
+    return identificativi
 
 
 def leggi_modelli_disponibili(base_url: str, timeout: float = TIMEOUT_CONTROLLO) -> list[str]:

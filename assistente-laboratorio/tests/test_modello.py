@@ -21,7 +21,10 @@ def test_estrai_identificativi_json_non_valido():
         estrai_identificativi(b"<html>")
 
 
-@pytest.mark.parametrize("corpo", [b"{}", b"[]", b'{"data": 5}', b'{"data": [{"nome": "x"}]}'])
+@pytest.mark.parametrize("corpo", [
+    b"{}", b"[]", b'{"data": 5}', b'{"data": [{"nome": "x"}]}',
+    b'{"data": [{"id": 1}]}', b'{"data": [{"id": null}, {"id": "x"}]}',    # identificativi non stringa
+])
 def test_estrai_identificativi_struttura_inattesa(corpo):
     with pytest.raises(ErroreServer):
         estrai_identificativi(corpo)
