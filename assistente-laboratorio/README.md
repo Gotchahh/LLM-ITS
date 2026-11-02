@@ -14,6 +14,8 @@ Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-N
 ## Requisiti
 
 - Python 3.14.7 (avviabile con `py -3.14`)
+- LM Studio con il server locale avviato e un modello caricato che supporti il tool calling (per esempio
+  `google/gemma-4-e4b`); resta sul computer host, anche con Docker
 - Docker Desktop, solo per l'avvio con Docker Compose (vedi «Avvio con Docker Compose»)
 
 ## Installazione
