@@ -96,9 +96,8 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 Sono quattro prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
 precedente, due domande sull'ora nella stessa sessione (due richieste di `ora_corrente`, una per turno) e l'ora
 di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`).
-Con un modello locale possono richiedere alcuni minuti (la prima chiamata carica il modello; con
-`google/gemma-4-e4b` le quattro prove sono durate circa 3 minuti e 45 secondi).
-
+Con un modello locale possono richiedere diversi minuti (ogni prova fa più chiamate al modello e la prima carica
+il modello). Se il modello non chiama lo strumento la prova fallisce: il fallimento va riportato, non aggirato.
 ## Avvio
 
 LM Studio deve avere il server locale avviato e il modello di `LMSTUDIO_MODEL` disponibile. Dalla cartella
@@ -305,8 +304,18 @@ docker ps
 cercare l'identificativo. `--rm` rimuove il container all'uscita; la rete creata da Compose si toglie con
 `docker compose down`. I comandi della chat sono quelli dell'avvio locale (`/esci`, `/log`).
 
-Nella demo interattiva questi tre comandi, `/log` con la scritta `Ragionando...` e Ctrl+C durante l'attesa sono
-stati provati a mano e hanno funzionato.
+La demo interattiva non è automatizzabile: l'ha provata a mano l'utente il 28/10/2026 e, secondo il suo resoconto,
+hanno funzionato una conversazione a due turni, due domande sull'ora, la domanda su New York, `/log` con la scritta
+`Ragionando...` e Ctrl+C durante l'attesa. Questi passaggi non sono stati ripetuti nella verifica finale (che ha
+coperto soltanto i comandi da pipe e `docker compose build`). Checklist per ripetere la prova a mano:
+
+1. `docker compose build`, poi `docker compose run --rm --name assistente-demo assistente`.
+2. Conversazione su due turni (per esempio il colore preferito e poi la domanda su quale sia).
+3. Due domande sull'ora nella stessa sessione, con il giorno della settimana corretto.
+4. «Che ore sono a New York?»: nel log la richiesta contiene `"fuso": "America/New_York"`.
+5. Da un secondo terminale `docker logs -f assistente-demo` mostra gli stessi log.
+6. `/log` nasconde i log e fa comparire `Ragionando...` durante l'attesa; un secondo `/log` li mostra di nuovo.
+7. Ctrl+C durante l'attesa: saluto e uscita senza traceback.
 
 Confronto tra l'orologio dell'host e quello della macchina virtuale di Docker (l'ora dello strumento parte dal
 sistema in cui gira il programma):
@@ -317,8 +326,8 @@ docker run --rm python:3.14.7-slim date
 ```
 
 ```text
-mercoledì 28 ottobre 2026 12:03:02
-Wed Oct 28 11:03:06 UTC 2026
+lunedì 2 novembre 2026 09:27:28
+Mon Nov  2 08:27:28 UTC 2026
 ```
 
 Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due ore coincidono.
@@ -327,30 +336,41 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
 
 - **Il server non è disponibile**: l'avvio termina con
   `Errore: Impossibile leggere l'elenco dei modelli da http://.../v1/models: ...` e codice 1. Avviare il
-  server locale in LM Studio e controllare `LMSTUDIO_BASE_URL`.
+  server locale in LM Studio e controllare `LMSTUDIO_BASE_URL`. Provato con `LMSTUDIO_BASE_URL=http://localhost:9/v1`:
+  messaggio come sopra e codice 1.
 - **Il modello è assente**: l'avvio termina con
   `Errore: Il modello «...» non è disponibile in LM Studio. Modelli disponibili: ...` e codice 1. Copiare in
-  `LMSTUDIO_MODEL` uno degli identificativi elencati.
+  `LMSTUDIO_MODEL` uno degli identificativi elencati. Provato con `LMSTUDIO_MODEL=modello-inesistente`.
 - **Il server si ferma durante la chat**, o una richiesta supera il timeout (180 s, con un solo nuovo
-  tentativo): la chat stampa
-  `Errore: nessuna risposta valida da LM Studio (<indirizzo>): <Classe>: <dettaglio>. Turno annullato.`
-  Il turno è scartato (domanda e risposta non entrano nella cronologia) e la chat prosegue: riprovare dopo
-  aver riavviato il server. Con `LOG_LEVEL=DEBUG` il traceback completo compare nel log.
-- **Contesto esaurito** (sessione lunga): LM Studio rifiuta la richiesta e l'errore compare con lo stesso
-  messaggio. Aumentare la lunghezza di contesto del modello nelle impostazioni di caricamento in LM Studio.
-  Attenzione: la politica di overflow di LM Studio può anche tagliare messaggi in silenzio, senza errore;
-  se il modello sembra dimenticare l'inizio della conversazione, aumentare il contesto o riavviare la sessione.
+  tentativo): il programma è fatto per stampare
+  `Errore: nessuna risposta valida da LM Studio (<indirizzo>): <Classe>: <dettaglio>. Turno annullato.`,
+  scartare il turno (domanda e risposta non entrano nella cronologia) e proseguire. *Non provato con il modello
+  reale* (non si è fermato LM Studio durante la chat): il comportamento è verificato solo dai test automatici
+  con un modello finto. Con `LOG_LEVEL=DEBUG` si ottiene il traceback completo nel log.
+- **Contesto esaurito** (sessione lunga): *non provato*. La cronologia cresce senza tagli per tutta la sessione.
+  Se LM Studio rifiuta la richiesta, l'errore dovrebbe comparire con lo stesso messaggio del punto precedente; in
+  quel caso conviene uscire con `/esci` e riavviare. Aumentare la lunghezza di contesto nelle impostazioni di
+  caricamento in LM Studio è il rimedio previsto, ma non è stato provato. La politica di overflow di LM Studio
+  potrebbe anche tagliare messaggi in silenzio (ipotesi non verificata): se il modello sembra dimenticare l'inizio della
+  conversazione, riavviare la sessione.
 - **Risposta vuota o non valida**: se il modello risponde senza testo (o con una richiesta di strumento
-  malformata) compare `Errore: il modello non ha prodotto una risposta valida. Turno annullato.` e nel log un
-  avviso `[WARNING]`.
+  malformata) il programma stampa `Errore: il modello non ha prodotto una risposta valida. Turno annullato.` e
+  scrive un avviso `[WARNING]` nel log. Verificato solo dai test automatici con un modello finto, non con il
+  modello reale.
 
 Con Docker Compose (sintomo, primo controllo):
 
-- **Il container termina subito**: leggere l'output del terminale (un errore di avvio dell'applicazione chiude il
-  container con codice 1), poi controllare il comando di avvio e l'input interattivo. `docker compose run` collega
-  la tastiera; `docker compose up` no. Provato con `docker compose up -d`: il container risulta `Up` ma resta
-  in attesa di un input che nessuno può digitare e `docker logs` è vuoto. Si ferma e si rimuove con
-  `docker compose down`.
+- **Il container resta `Up` ma non succede nulla** (avviato con `docker compose up` invece di `run`): l'applicazione
+  attende un input che nessuno può digitare e non scrive nulla. Provato il 02/11/2026: con `docker compose up -d`
+  `docker ps` mostra il container `Up` e `docker compose logs` è vuoto; con `docker compose up` (in primo piano) compare
+  solo `Attaching to assistente-1` e il comando non termina. Si ferma e si rimuove con `docker compose down`. Per chattare usare `docker compose run`.
+- **Il container termina subito, con codice 1**: l'errore di avvio compare nell'output del terminale (per esempio
+  server o modello non disponibili, come nelle prime due voci). Provato con `LMSTUDIO_BASE_URL` sbagliata (vedi
+  la voce successiva).
+- **`docker compose` si lamenta di un file `.env` non trovato**: il file indicato da `env_file` deve esistere.
+  Provato in una copia temporanea del progetto senza `.env`: `docker compose config` e `docker compose run` terminano
+  con codice 1 e `env file ...\.env not found: CreateFile ...\.env: The system cannot find the file specified.`
+  Creare il file come in «Configurazione» (`Copy-Item .env.example .env`).
 - **Nessuna connessione al modello**: controllare in ordine il server di LM Studio (avviato, modello caricato),
   l'URL configurato e la raggiungibilità. Nel container `localhost` è il container stesso: con
   `LMSTUDIO_BASE_URL=http://localhost:1234/v1` l'avvio termina subito con codice 1.

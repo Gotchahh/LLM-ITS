@@ -1,8 +1,7 @@
 # Assistente del laboratorio
 
 Progetto del corso «Deep Learning e LLM: costruire chatbot e agenti».
-La cartella del progetto è `assistente-laboratorio/`; all'inizio contiene soltanto questo file.
-Struttura, dipendenze e comandi verranno definiti con la specifica e il piano.
+La cartella del progetto è `assistente-laboratorio/`; i comandi si eseguono da lì, in PowerShell.
 
 ## Obiettivo
 Un'applicazione da terminale in Python che conversa con un modello locale e:
@@ -21,16 +20,41 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   non leggerle per copiarne il codice e non modificarle.
 - Lavorare nel branch corrente; nessun branch o worktree nuovo se non richiesto.
 
+## Struttura
+- `assistente/`: pacchetto avviato con `python -m assistente`.
+  - `config.py`: variabili d'ambiente, validazione, configurazione dei log.
+  - `strumenti.py`: strumento `ora_corrente` (fuso facoltativo, istante iniettabile).
+  - `modello.py`: `ChatOpenAI` verso LM Studio e controllo dell'elenco modelli all'avvio.
+  - `grafo.py`: stato, nodi e instradamento; `costruisci_grafo(modello, strumenti)`.
+  - `cli.py`, `__main__.py`: ciclo di chat, cronologia, comandi `/esci` e `/log`, scritta «Ragionando...».
+- `tests/`: test automatici senza modello; `test_reale.py` contiene le prove con LM Studio (marcatore `reale`).
+- `docs/superpowers/`: specifica e piano.
+- `Dockerfile`, `compose.yaml`, `.dockerignore`: avvio con Docker Compose.
+- `.env.example` (esempio senza credenziali), `requirements.txt`, `requirements-dev.txt`, `pyproject.toml`.
+
 ## Scelte tecniche
-- Python, codice sincrono e moduli piccoli, con una separazione semplice tra
+- Python 3.14.7 (`py -3.14 -m venv .venv`; immagine Docker `python:3.14.7-slim`). Si usa
+  `.\.venv\Scripts\python.exe` direttamente, senza `Activate.ps1`.
+- Codice sincrono e moduli piccoli, con una separazione semplice tra
   grafo, collegamento al modello, strumenti e interfaccia da terminale.
 - LM Studio sull'host, raggiunto tramite la sua API compatibile con OpenAI.
-- Indirizzo del server e identificativo del modello solo da variabili d'ambiente.
+- Indirizzo del server e identificativo del modello solo da variabili d'ambiente
+  (`LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`; inoltre `APP_TIMEZONE` e `LOG_LEVEL`).
   L'identificativo è quello restituito dal server (`GET /v1/models`), mai inventato.
-- Un file di configurazione di esempio senza credenziali; il file reale resta fuori da Git.
+- Un file di configurazione di esempio senza credenziali; il file reale (`.env`) resta fuori da Git.
 - Docker Compose per l'applicazione; LM Studio non va containerizzato.
-- Dipendenze motivate, concordate e con versioni fissate.
+- Dipendenze motivate, concordate e con versioni fissate in `requirements.txt`; `pytest` solo in
+  `requirements-dev.txt`.
 - Comandi documentati anche per PowerShell (Windows).
+
+## Comandi
+- Installazione: `py -3.14 -m venv .venv`, poi `.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt`.
+- Avvio: `.\.venv\Scripts\python.exe -m assistente`.
+- Test automatici (nessun modello; i `reale` sono esclusi di default): `.\.venv\Scripts\python.exe -m pytest`.
+- Test reali (LM Studio attivo, `.env` compilato; richiedono diversi minuti):
+  `.\.venv\Scripts\python.exe -m pytest -m reale -v`.
+- Docker: `docker compose build`, poi `docker compose run --rm --name assistente-demo assistente`
+  (si usa `run`, non `up`; con input da pipe `docker compose run --rm -T assistente`).
 
 ## Metodo: Superpowers
 - Usare le skill di Superpowers per brainstorming, specifica, piano, implementazione e verifica.
