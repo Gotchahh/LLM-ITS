@@ -3,14 +3,14 @@
 Applicazione da terminale in Python costruita attorno a un grafo LangGraph esplicito.
 Il grafo inoltra la conversazione al modello locale servito da LM Studio e conserva la
 cronologia per la durata della sessione (nessuna persistenza). Il modello può chiedere lo
-strumento orologio `ora_corrente` e lo strumento `calcola` della calcolatrice, offerto da un server MCP
-(vedi «Calcolatrice»); il programma li esegue davvero.
+strumento orologio `ora_corrente`, il convertitore di unità `converti` (vedi «Convertitore») e lo strumento
+`calcola` della calcolatrice, offerto da un server MCP (vedi «Calcolatrice»); il programma li esegue davvero.
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
 in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
 mancante sono del 02/11/2026; riprovati lo stesso giorno, con lo stesso esito, anche i messaggi d'errore della
-Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice, in locale e in Docker, sono del 03/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
+Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -100,14 +100,19 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 .\.venv\Scripts\python.exe -m pytest -m reale -v
 ```
 
-Sono cinque prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
+Sono sette prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
 precedente, due domande sull'ora nella stessa sessione (almeno una richiesta di `ora_corrente` per turno: il modello può
 chiamarla più volte nello stesso turno), l'ora
 di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`) e un calcolo («Quanto fa 12,5 per 8
-meno 3?»: il risultato `97` deve venire dallo strumento `calcola` e comparire nella risposta).
-Con un modello locale possono richiedere diversi minuti (il 03/11/2026, con `google/gemma-4-e4b`, 316 s; ogni prova
+meno 3?»: il risultato `97` deve venire dallo strumento `calcola` e comparire nella risposta) e due conversioni
+(«Quanti metri sono 4 cm?» e «Quanti gradi Fahrenheit sono 20 °C?»: i risultati `4 cm = 0,04 m` e `20 °C = 68 °F`
+devono venire dallo strumento `converti`, e `0,04` e `68` comparire nella risposta).
+Con un modello locale possono richiedere diversi minuti (il 03/11/2026, con `google/gemma-4-e4b`, 489 s; ogni prova
 fa più chiamate al modello e la prima carica il modello). Se il modello non chiama lo strumento la prova fallisce:
 il fallimento va riportato, non aggirato.
+
+I test del convertitore (senza modello) sono in `tests/test_convertitore.py` (conversioni, formato, nomi delle
+unità, errori) e in `tests/test_grafo.py` (il giro nel grafo con un modello finto, anche con errore).
 
 I test della calcolatrice (tutti senza modello) sono in quattro file:
 
@@ -251,6 +256,42 @@ Tu> Alla prossima!
 
 Il grafo ammette al massimo 10 passaggi per turno: se il modello continua a chiedere strumenti la chat stampa
 `Errore: limite di 10 passaggi raggiunto. Turno annullato.`, scarta il turno e prosegue.
+
+## Convertitore (funzione nel grafo)
+
+Per le conversioni di unità il modello chiede lo strumento `converti`, con tre argomenti: `valore` (un numero),
+`da` e `a` (le unità). Le unità ammesse sono:
+
+- lunghezze: `mm`, `cm`, `m`, `km`, `in` (pollici), `ft` (piedi), `mi` (miglia);
+- pesi: `mg`, `g`, `kg`, `t` (tonnellate), `lb` (libbre), `oz` (once);
+- temperature: `°C`, `°F`, `K`.
+
+Il modello può scrivere il simbolo o il nome italiano, al singolare o al plurale e senza badare alle maiuscole
+(`centimetri`, `Fahrenheit`, `libbre`). Lo strumento restituisce un testo come `25 m = 0,025 km`: il valore di
+partenza com'è, il risultato arrotondato a 6 cifre significative, con la virgola decimale e mai in notazione
+esponenziale. Il conto lo fa il programma, non il modello.
+
+Quando la conversione non ha senso lo strumento restituisce un errore in italiano, che il modello deve spiegare
+senza inventare un numero: grandezze diverse (`non si può convertire un peso (kg) in una lunghezza (m)`), unità
+fuori elenco (`unità non supportata «iarde»`, con l'elenco delle unità), temperature sotto lo zero assoluto, pesi
+o lunghezze negativi, valore non numerico.
+
+Come l'orologio, il convertitore è una **funzione Python del grafo** (`assistente/convertitore.py`): è un calcolo
+puro e locale, senza dati esterni né stato, quindi un server separato aggiungerebbe solo un processo e un punto di
+guasto. Prova reale da pipe del 03/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`; uguale in Docker):
+
+```text
+[INFO] instradamento: richiesta strumento converti {"a": "km", "da": "metri", "valore": 25}
+[INFO] nodo_strumenti: converti -> 25 m = 0,025 km
+[INFO] nodo_llm: chiamata al modello (4 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 18.7 s
+[INFO] instradamento: nessuno strumento -> fine
+Tu> Assistente> 25 metri sono **0,025 km**.
+```
+
+Nella stessa prova, a «Quanti metri sono 5 kg?» il modello ha risposto da solo, senza chiamare lo strumento, che
+chilogrammi e metri misurano grandezze diverse: la risposta era corretta, ma la spiegazione non veniva dal
+programma. I messaggi d'errore dello strumento sono verificati dai test automatici.
 
 ## Calcolatrice (strumento MCP)
 
@@ -510,6 +551,12 @@ Per la calcolatrice MCP (vedi «Calcolatrice») si controllano i livelli in ordi
 5. **`ToolMessage`**: `[INFO] nodo_strumenti: calcola -> <risultato>` è il risultato restituito al modello; un
    `[WARNING] nodo_strumenti: errore dello strumento calcola: <motivo>` è un errore controllato (per esempio
    `divisione per zero`) che il modello riceve e deve spiegare senza inventare un numero.
+
+Per il convertitore (vedi «Convertitore») con `LOG_LEVEL=INFO`: `[INFO] instradamento: richiesta strumento
+converti {...}` mostra la richiesta del modello e `[INFO] nodo_strumenti: converti -> <risultato>` il risultato; un
+errore controllato (per esempio unità non supportata) compare come `[WARNING] nodo_strumenti: errore dello
+strumento converti: <motivo>`. Se manca la riga `richiesta strumento converti`, il modello ha risposto senza lo
+strumento e il numero non viene dal programma.
 
 Con Docker Compose (sintomo, primo controllo):
 
