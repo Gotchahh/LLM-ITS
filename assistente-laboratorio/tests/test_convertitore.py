@@ -94,3 +94,16 @@ def test_strumento():
     with pytest.raises(ToolException) as errore:
         strumento.invoke({"valore": "tanti", "da": "m", "a": "km"})
     assert "numero" in str(errore.value) and "validation" not in str(errore.value).lower()
+
+
+@pytest.mark.parametrize("da, a", [("km", "mm"), ("°C", "°F")])
+def test_risultato_troppo_grande(da, a):
+    assert "troppo grande" in messaggio_d_errore(1e308, da, a)
+
+
+@pytest.mark.parametrize("argomenti", [{"valore": 1, "da": "m"}, {"valore": 1, "da": 5, "a": "km"}])
+def test_argomenti_non_validi_spiegano_tutti_i_parametri(argomenti):
+    with pytest.raises(ToolException) as errore:
+        crea_strumento_convertitore().invoke(argomenti)
+    messaggio = str(errore.value)
+    assert all(nome in messaggio for nome in ("valore", "da", "a", "numero", "unità"))

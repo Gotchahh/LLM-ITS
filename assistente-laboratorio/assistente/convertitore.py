@@ -42,6 +42,10 @@ DESCRIZIONE_VALORE = "Il numero da convertire, per esempio 25 o 2.5"
 DESCRIZIONE_DA = "Unità di partenza: simbolo o nome italiano, per esempio cm, centimetri, °C, libbre"
 DESCRIZIONE_A = "Unità di arrivo: simbolo o nome italiano, per esempio m, metri, °F, kg"
 ERRORE_NUMERO = "il valore da convertire deve essere un numero, per esempio 25 o 2.5"
+ERRORE_ARGOMENTI = (
+    "argomenti non validi: servono valore (un numero, per esempio 25 o 2.5), "
+    "da e a (le unità come testo, per esempio cm e m)"
+)
 
 
 def formatta_numero(x: float, cifre: int | None = None) -> str:
@@ -111,6 +115,8 @@ def converti(valore: float, da: str, a: str) -> str:
             negativo = "negativo" if grandezza == "peso" else "negativa"
             raise ToolException(f"{ARTICOLI[grandezza]} non può essere {negativo}")
         risultato = valore * fattore_da / fattore_a
+    if not math.isfinite(risultato):
+        raise ToolException("il risultato è troppo grande per essere rappresentato")
     return (
         f"{formatta_numero(valore)} {origine} = "
         f"{formatta_numero(risultato, CIFRE_SIGNIFICATIVE)} {destinazione}"
@@ -118,8 +124,8 @@ def converti(valore: float, da: str, a: str) -> str:
 
 
 def _rifiuta_valore(_errore) -> str:
-    """Un valore non numerico diventa una ToolException in italiano, senza la traccia di validazione."""
-    raise ToolException(ERRORE_NUMERO)
+    """Argomenti mancanti o del tipo sbagliato: ToolException in italiano, senza la traccia di validazione."""
+    raise ToolException(ERRORE_ARGOMENTI)
 
 
 def crea_strumento_convertitore() -> BaseTool:
