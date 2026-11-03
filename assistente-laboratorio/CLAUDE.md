@@ -10,15 +10,20 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - conserva la cronologia della conversazione per la durata della sessione (nessuna persistenza);
 - offre uno strumento orologio con fuso orario esplicito, richiesto dal modello tramite tool calling
   ed eseguito davvero dal programma;
+- dalla Lezione 5 offre altri strumenti, eseguiti con lo stesso ciclo del grafo (richiesta del modello →
+  esecuzione → `ToolMessage` correlato → nuova chiamata al modello) e ottenuti con tre modalità:
+  funzione Python nel grafo, API HTTP con FastAPI, server MCP;
 - si avvia anche con Docker Compose.
 
 ## Confini
-- Implementare solo i requisiti concordati. Altri strumenti, MCP, workflow e RAG arriveranno
-  nelle lezioni successive: non anticiparli.
+- Implementare solo i requisiti concordati. Lezione 5: le sei funzionalità proposte (calcolatrice,
+  convertitore, giorni e scadenze, note, catalogo, meteo), una alla volta, ciascuna con una delle tre
+  modalità: funzione nel grafo, API FastAPI, MCP. La modalità è scelta e motivata nella specifica della
+  feature. L'orologio resta locale. Non anticipare workflow e RAG.
 - Niente interfacce grafiche, servizi cloud o framework non concordati.
 - Lavorare solo dentro `assistente-laboratorio/`. La repository contiene altre lezioni:
   non leggerle per copiarne il codice e non modificarle.
-- Lavorare nel branch corrente; nessun branch o worktree nuovo se non richiesto.
+- Lavorare nel branch `feature/<nome>` della feature in corso; nessun worktree.
 
 ## Struttura
 - `assistente/`: pacchetto avviato con `python -m assistente`.
@@ -36,7 +41,8 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - Python 3.14.7 (`py -3.14 -m venv .venv`; immagine Docker `python:3.14.7-slim`). Si usa
   `.\.venv\Scripts\python.exe` direttamente, senza `Activate.ps1`.
 - Codice sincrono e moduli piccoli, con una separazione semplice tra
-  grafo, collegamento al modello, strumenti e interfaccia da terminale.
+  grafo, collegamento al modello, strumenti e interfaccia da terminale; l'asincronia richiesta dalle
+  librerie MCP resta confinata nel modulo client MCP.
 - LM Studio sull'host, raggiunto tramite la sua API compatibile con OpenAI.
 - Indirizzo del server e identificativo del modello solo da variabili d'ambiente
   (`LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`; inoltre `APP_TIMEZONE` e `LOG_LEVEL`).
@@ -44,7 +50,10 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - Un file di configurazione di esempio senza credenziali; il file reale (`.env`) resta fuori da Git.
 - Docker Compose per l'applicazione; LM Studio non va containerizzato.
 - Dipendenze motivate, concordate e con versioni fissate in `requirements.txt`; `pytest` solo in
-  `requirements-dev.txt`.
+  `requirements-dev.txt`. Le dipendenze di una feature si aggiungono solo con quella feature, con versione
+  fissata e verificata su Python 3.14.7.
+- Nel pacchetto `assistente/` non si importano direttamente `openai`, `httpx` né `pydantic` (eccezione: i
+  tipi di `langchain_core`); il wrapper verso le API HTTP usa `urllib`.
 - Comandi documentati anche per PowerShell (Windows).
 
 ## Comandi
@@ -69,14 +78,22 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   instradamento, strumento con istante controllato).
 - Prove reali con LM Studio e con Docker tenute separate e attivate esplicitamente.
 - Una risposta simulata non dimostra che il modello locale sappia usare lo strumento.
+- Server MCP/API e collegamenti testati senza modello (discovery, invocazione diretta, errori); la prova
+  reale verifica che il modello scelga lo strumento giusto.
+- Le prove da pipe si eseguono senza `PYTHONIOENCODING` (la shell di Claude la imposta), in una
+  PowerShell pulita.
 - Nel resoconto indicare che cosa è stato eseguito, con quale esito, e che cosa resta da provare.
 
 ## Git
 - Conventional Commits in italiano, per esempio `feat(grafo): ...`, `test(strumenti): ...`,
   `docs: ...`.
+- Branch: `main` contiene solo versioni complete e verificate; `dev` è il branch di integrazione; ogni
+  feature va in `feature/<nome>`, creato da `dev` (per esempio `feature/calcolatrice`).
+- Una feature finita, verificata e revisionata entra in `dev` con `git merge --no-ff`; `dev` entra in
+  `main` con `--no-ff` solo quando lo dichiaro completo.
 - Prima di ogni commit: `git status`, controllo del diff, staging selettivo dei soli file pertinenti.
 - Mai versionare credenziali, `.env`, ambienti virtuali, cache o pesi dei modelli.
-- Push soltanto su mia richiesta.
+- Merge e push soltanto su mia richiesta.
 
 ## Documentazione
 - Tenere aggiornato il README con configurazione, avvio, test e diagnosi, riportando solo
