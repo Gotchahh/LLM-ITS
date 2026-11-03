@@ -3,13 +3,14 @@
 Applicazione da terminale in Python costruita attorno a un grafo LangGraph esplicito.
 Il grafo inoltra la conversazione al modello locale servito da LM Studio e conserva la
 cronologia per la durata della sessione (nessuna persistenza). Il modello può chiedere lo
-strumento orologio `ora_corrente`, che il programma esegue davvero.
+strumento orologio `ora_corrente` e lo strumento `calcola` della calcolatrice, offerto da un server MCP
+(vedi «Calcolatrice»); il programma li esegue davvero.
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
 in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
 mancante sono del 02/11/2026; riprovati lo stesso giorno, con lo stesso esito, anche i messaggi d'errore della
-Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
+Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice, in locale e in Docker, sono del 03/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -99,12 +100,27 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 .\.venv\Scripts\python.exe -m pytest -m reale -v
 ```
 
-Sono quattro prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
+Sono cinque prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
 precedente, due domande sull'ora nella stessa sessione (almeno una richiesta di `ora_corrente` per turno: il modello può
-chiamarla più volte nello stesso turno) e l'ora
-di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`).
-Con un modello locale possono richiedere diversi minuti (ogni prova fa più chiamate al modello e la prima carica
-il modello). Se il modello non chiama lo strumento la prova fallisce: il fallimento va riportato, non aggirato.
+chiamarla più volte nello stesso turno), l'ora
+di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`) e un calcolo («Quanto fa 12,5 per 8
+meno 3?»: il risultato `97` deve venire dallo strumento `calcola` e comparire nella risposta).
+Con un modello locale possono richiedere diversi minuti (il 03/11/2026, con `google/gemma-4-e4b`, 316 s; ogni prova
+fa più chiamate al modello e la prima carica il modello). Se il modello non chiama lo strumento la prova fallisce:
+il fallimento va riportato, non aggirato.
+
+I test della calcolatrice (tutti senza modello) sono in quattro file:
+
+- `tests/test_calcolo.py`: la logica pura (risultati, formato dei numeri, errori, nessuna esecuzione di codice);
+- `tests/test_server_mcp.py`: il server MCP avviato davvero su stdio (catalogo, invocazione, errori);
+- `tests/test_client_mcp.py`: il client (strumenti sincroni, errori di validazione e di trasporto, Ctrl+C);
+- `tests/test_integrazione_mcp.py`: il grafo con un modello finto e il server MCP vero.
+
+I test che avviano il server sono più lenti degli altri (circa 2 s per ogni avvio). Per provare solo il server:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_server_mcp.py -v
+```
 
 ## Avvio
 
@@ -235,6 +251,79 @@ Tu> Alla prossima!
 
 Il grafo ammette al massimo 10 passaggi per turno: se il modello continua a chiedere strumenti la chat stampa
 `Errore: limite di 10 passaggi raggiunto. Turno annullato.`, scarta il turno e prosegue.
+
+## Calcolatrice (strumento MCP)
+
+Per i calcoli il modello chiede lo strumento `calcola`, con un solo argomento testuale `espressione` (per
+esempio `12.5*8-3`). Sono ammessi numeri (con il punto per i decimali), `+ - * / // % **` e parentesi; `%` è il
+resto della divisione, non la percentuale. Il risultato è calcolato dal programma, mai dal modello, e senza
+eseguire codice: l'espressione viene analizzata e si valutano solo le operazioni ammesse.
+
+A differenza dell'orologio, che è una funzione Python del grafo, la calcolatrice è un **server MCP**: un
+programma separato che dichiara i propri strumenti con il protocollo MCP. L'assistente non conosce in anticipo
+lo strumento: lo scopre chiedendo il catalogo al server.
+
+- Server: cartella `calcolatrice_mcp/` (`calcolo.py` la logica pura, `server.py` il server FastMCP); si avvia con
+  `python -m calcolatrice_mcp` e comunica su stdin/stdout (trasporto stdio). Non serve avviarlo a mano: lo avvia
+  l'assistente.
+- Client: `assistente/client_mcp.py`. All'avvio legge il catalogo e rende sincroni gli strumenti per il grafo.
+
+Il percorso di una domanda è quello dell'orologio, con un passo in più all'inizio:
+
+1. **discovery**, all'avvio: l'assistente avvia il server e ne legge il catalogo (nome, descrizione e schema di
+   `calcola`);
+2. **richiesta**: il modello risponde con una richiesta strutturata di `calcola` invece che con un testo;
+3. **esecuzione**: il nodo degli strumenti chiama il server MCP, che calcola il risultato;
+4. **`ToolMessage`**: il risultato torna al modello come messaggio correlato alla richiesta; il modello scrive la
+   risposta finale.
+
+Prova da pipe (prima domanda: un calcolo; seconda: una divisione per zero):
+
+```powershell
+"Quanto fa 12,5 per 8 meno 3?`nQuanto fa 5 diviso 0?`n/esci" | .\.venv\Scripts\python.exe -m assistente
+```
+
+Con `LOG_LEVEL=INFO` i quattro passi si riconoscono nei log su stderr (esecuzione reale del 03/11/2026 con
+`google/gemma-4-e4b`; la riga del catalogo è accorciata):
+
+```text
+[INFO] client_mcp: catalogo di calcolatrice letto in 2.4 s: calcola (Calcola un'espressione aritmetica e restituisce il risultato esatto; ...)
+[INFO] nodo_llm: chiamata al modello (2 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 18.6 s
+[INFO] instradamento: richiesta strumento calcola {"espressione": "12.5*8-3"}
+[INFO] client_mcp: calcola eseguito in 2.6 s
+[INFO] nodo_strumenti: calcola -> 97
+[INFO] nodo_llm: chiamata al modello (4 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 27.4 s
+[INFO] instradamento: nessuno strumento -> fine
+Tu> Assistente> Il risultato di 12,5 per 8 meno 3 è 97.
+```
+
+Il modello ha scritto `12,5` all'italiana nella domanda ma `12.5` nell'argomento, come chiede la descrizione dello
+strumento. Ogni chiamata a `calcola` avvia un nuovo processo del server: la discovery e ogni calcolo richiedono
+tra 2,5 e 3 s in locale e poco più di 1 s nel container Docker (catalogo 1,3 s, `calcola` 1,1 s), molto meno della
+risposta del modello (circa 20 s).
+
+**Errori controllati.** Un'espressione non valida non interrompe il turno: il server risponde con un messaggio
+d'errore in italiano, che arriva al modello come `ToolMessage` con stato `error`, e nel log compare un
+`[WARNING]`. Per la seconda domanda:
+
+```text
+[INFO] instradamento: richiesta strumento calcola {"espressione": "5/0"}
+[WARNING] nodo_strumenti: errore dello strumento calcola: divisione per zero
+[INFO] nodo_llm: chiamata al modello (8 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 23.8 s
+[INFO] instradamento: nessuno strumento -> fine
+Tu> Assistente> Non è possibile calcolare 5 diviso 0; si tratta di un errore di divisione per zero.
+```
+
+Gli altri errori controllati: espressione vuota o più lunga di 200 caratteri, sintassi non valida, elementi non
+ammessi (nomi, funzioni, testo), virgola decimale (`2,5`: si suggerisce il punto), `^` invece di `**`, esponente
+oltre 100 in valore assoluto, numeri oltre `10**100` in valore assoluto, risultato non reale. Se il server non
+risponde durante la chat (errore di trasporto), anche il modello riceve un `ToolMessage` d'errore
+(`server MCP calcolatrice non raggiungibile: ...`) e la chat continua; nel log compaiono due `[WARNING]`, uno di
+`client_mcp` e uno di `nodo_strumenti`. Questo caso è coperto solo dai test automatici. Se il server non parte
+all'avvio, il programma termina con codice 1 (vedi «Diagnosi»).
 
 ## Mostrare e nascondere i log
 
@@ -401,6 +490,26 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
   malformata) il programma stampa `Errore: il modello non ha prodotto una risposta valida. Turno annullato.` e
   scrive un avviso `[WARNING]` nel log. Verificato solo dai test automatici con un modello finto, non con il
   modello reale.
+
+Per la calcolatrice MCP (vedi «Calcolatrice») si controllano i livelli in ordine, dal server alla risposta:
+
+1. **Il server da solo**, senza modello e senza assistente:
+   `.\.venv\Scripts\python.exe -m pytest tests/test_server_mcp.py -v` (quattro test: catalogo, invocazione
+   diretta, due errori). Se fallisce, il problema è nel server o nelle dipendenze MCP.
+2. **Discovery all'avvio**: con `LOG_LEVEL=INFO` la prima riga è
+   `[INFO] client_mcp: catalogo di calcolatrice letto in ... s: calcola (...)`. Se il server non parte, l'avvio
+   termina con codice 1 e un messaggio come
+   `Errore: server MCP calcolatrice non avviato (python.exe -m calcolatrice_mcp): Connection closed`, preceduto
+   dall'errore del processo del server (per esempio un modulo mancante). Il messaggio è stato provato il
+   03/11/2026 chiamando il client con un modulo inesistente; il primo controllo è avviare dalla cartella del
+   progetto con l'ambiente virtuale completo (`requirements.txt`).
+3. **Richiesta del modello**: `[INFO] instradamento: richiesta strumento calcola {"espressione": "..."}`. Se manca,
+   il modello ha risposto senza chiamare lo strumento e il numero non viene dalla calcolatrice.
+4. **Esecuzione**: `[INFO] client_mcp: calcola eseguito in ... s`. Un `[WARNING] client_mcp: server MCP
+   calcolatrice non raggiungibile: ...` indica un errore di trasporto (il server si è interrotto).
+5. **`ToolMessage`**: `[INFO] nodo_strumenti: calcola -> <risultato>` è il risultato restituito al modello; un
+   `[WARNING] nodo_strumenti: errore dello strumento calcola: <motivo>` è un errore controllato (per esempio
+   `divisione per zero`) che il modello riceve e deve spiegare senza inventare un numero.
 
 Con Docker Compose (sintomo, primo controllo):
 

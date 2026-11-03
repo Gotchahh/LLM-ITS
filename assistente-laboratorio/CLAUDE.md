@@ -32,6 +32,10 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   - `modello.py`: `ChatOpenAI` verso LM Studio e controllo dell'elenco modelli all'avvio.
   - `grafo.py`: stato, nodi e instradamento; `costruisci_grafo(modello, strumenti)`.
   - `cli.py`, `__main__.py`: ciclo di chat, cronologia, comandi `/esci` e `/log`, scritta «Ragionando...».
+  - `client_mcp.py`: discovery del server MCP della calcolatrice e strumenti MCP resi sincroni (unico modulo con
+    `asyncio` e `langchain_mcp_adapters`).
+- `calcolatrice_mcp/`: server MCP della calcolatrice (`calcolo.py` logica pura, `server.py` FastMCP su stdio),
+  avviato dall'assistente con `python -m calcolatrice_mcp`; non importa nulla da `assistente/`.
 - `tests/`: test automatici senza modello; `test_reale.py` contiene le prove con LM Studio (marcatore `reale`).
 - `docs/superpowers/`: specifica e piano.
 - `Dockerfile`, `compose.yaml`, `.dockerignore`: avvio con Docker Compose.
