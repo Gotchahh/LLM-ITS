@@ -131,4 +131,4 @@ def test_main_passa_al_grafo_l_orologio_e_gli_strumenti_mcp(monkeypatch):
     monkeypatch.setattr(avvio, "costruisci_grafo", lambda modello, strumenti: ricevuti.append(strumenti) or "grafo")
     monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: None)
     assert avvio.main() == 0
-    assert [s.name for s in ricevuti[0]] == ["ora_corrente", "calcola"]
+    assert [s.name for s in ricevuti[0]] == ["ora_corrente", "converti", "calcola"]

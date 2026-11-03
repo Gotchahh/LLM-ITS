@@ -7,6 +7,7 @@ import pytest
 
 from assistente.client_mcp import carica_strumenti_mcp
 from assistente.config import carica_configurazione, leggi_file_env
+from assistente.convertitore import crea_strumento_convertitore
 from assistente.grafo import costruisci_grafo, esegui_turno
 from assistente.modello import crea_modello, leggi_modelli_disponibili, verifica_modello
 from assistente.strumenti import crea_strumento_orologio
@@ -21,7 +22,8 @@ def grafo():
     """Grafo collegato al modello reale, con la configurazione di `.env` e dell'ambiente come in `main`."""
     config = carica_configurazione({**leggi_file_env(FILE_ENV), **os.environ})
     verifica_modello(config.modello, leggi_modelli_disponibili(config.base_url))
-    return costruisci_grafo(crea_modello(config), [crea_strumento_orologio(config.fuso), *carica_strumenti_mcp()])
+    strumenti = [crea_strumento_orologio(config.fuso), crea_strumento_convertitore(), *carica_strumenti_mcp()]
+    return costruisci_grafo(crea_modello(config), strumenti)
 
 
 def test_reale_risposta_ordinaria(grafo):
@@ -62,3 +64,15 @@ def test_reale_calcolo(grafo):
     cronologia = esegui_turno(grafo, [], "Quanto fa 12,5 per 8 meno 3?")
     risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "calcola"]
     assert "97" in risultati and "97" in cronologia[-1].text
+
+
+def test_reale_conversione_lunghezza(grafo):
+    cronologia = esegui_turno(grafo, [], "Quanti metri sono 4 cm?")
+    risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "converti"]
+    assert "4 cm = 0,04 m" in risultati and "0,04" in cronologia[-1].text
+
+
+def test_reale_conversione_temperatura(grafo):
+    cronologia = esegui_turno(grafo, [], "Quanti gradi Fahrenheit sono 20 °C?")
+    risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "converti"]
+    assert "20 °C = 68 °F" in risultati and "68" in cronologia[-1].text

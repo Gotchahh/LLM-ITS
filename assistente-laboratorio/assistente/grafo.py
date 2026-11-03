@@ -25,7 +25,10 @@ PROMPT_DI_SISTEMA = (
     "Per qualsiasi calcolo aritmetico chiama lo strumento calcola con l'espressione "
     "(numeri con il punto decimale, ** per le potenze) invece di calcolare da te, "
     "e usa il risultato così com'è; se lo strumento restituisce un errore, "
-    "dillo senza inventare un risultato."
+    "dillo senza inventare un risultato. "
+    "Per ogni conversione tra unità di lunghezza, peso o temperatura chiama lo strumento converti "
+    "invece di calcolare da te o con calcola, e usa il risultato così com'è; "
+    "se lo strumento restituisce un errore, di' che la conversione non si può fare e perché."
 )
 
 
