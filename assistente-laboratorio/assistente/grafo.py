@@ -6,7 +6,7 @@ import time
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
@@ -21,7 +21,11 @@ PROMPT_DI_SISTEMA = (
     "anche se nella conversazione c'è già un risultato precedente: quel risultato è superato. "
     "Non dedurre informazioni temporali che il risultato non contiene. "
     "Per l'ora di un'altra città chiama ora_corrente con il fuso IANA di quella città "
-    "(per esempio America/New_York) e usa il risultato così com'è, senza convertire da te."
+    "(per esempio America/New_York) e usa il risultato così com'è, senza convertire da te. "
+    "Per qualsiasi calcolo aritmetico chiama lo strumento calcola con l'espressione "
+    "(numeri con il punto decimale, ** per le potenze) invece di calcolare da te, "
+    "e usa il risultato così com'è; se lo strumento restituisce un errore, "
+    "dillo senza inventare un risultato."
 )
 
 
@@ -77,11 +81,16 @@ def costruisci_grafo(modello, strumenti: list[BaseTool]) -> CompiledStateGraph:
         return {"messages": [risposta]}
 
     def nodo_strumenti(stato: Stato) -> dict:
-        """Esegue ogni richiesta dell'ultimo messaggio e risponde con un ToolMessage per ciascuna."""
+        """Esegue ogni richiesta dell'ultimo messaggio e risponde con un ToolMessage per ciascuna.
+
+        Una `ToolException` diventa un ToolMessage con stato "error" e il turno prosegue;
+        ogni altra eccezione risale e annulla il turno.
+        """
         risposte = []
         for richiesta in stato["messages"][-1].tool_calls:
             nome = richiesta["name"]
             strumento = per_nome.get(nome)
+            esito = "success"
             if strumento is None:
                 logger.warning("nodo_strumenti: strumento sconosciuto %s", nome)
                 risultato = f"Errore: strumento sconosciuto {nome}"
@@ -94,9 +103,16 @@ def costruisci_grafo(modello, strumenti: list[BaseTool]) -> CompiledStateGraph:
                         nome,
                         json.dumps(ignorati, ensure_ascii=False),
                     )
-                risultato = strumento.invoke(argomenti)
-                logger.info("nodo_strumenti: %s -> %s", nome, risultato)
-            risposte.append(ToolMessage(content=risultato, tool_call_id=richiesta["id"], name=nome))
+                try:
+                    risultato = strumento.invoke(argomenti)
+                    logger.info("nodo_strumenti: %s -> %s", nome, risultato)
+                except ToolException as errore:
+                    risultato = f"Errore: {errore}"
+                    esito = "error"
+                    logger.warning("nodo_strumenti: errore dello strumento %s: %s", nome, errore)
+            risposte.append(
+                ToolMessage(content=risultato, tool_call_id=richiesta["id"], name=nome, status=esito)
+            )
         return {"messages": risposte}
 
     costruttore = StateGraph(Stato)

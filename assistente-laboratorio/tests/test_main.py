@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 from conftest import VALIDO, FlussoDiTesto
+from langchain_core.tools import StructuredTool
 
 import assistente.__main__ as avvio
+from assistente.client_mcp import ErroreMCP
 
 VARIABILI = (*VALIDO, "LOG_LEVEL")
 
@@ -19,6 +21,7 @@ def ambiente_pulito(monkeypatch, tmp_path):
     for nome in VARIABILI:
         monkeypatch.delenv(nome, raising=False)
     monkeypatch.setattr(avvio, "configura_log", lambda livello: None)
+    monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
 
 
 def usa_flussi_finti(monkeypatch, ingresso: bytes = b""):
@@ -102,3 +105,30 @@ def test_main_identificativi_dei_modelli_non_stringa_errore_chiaro_e_uscita_1(mo
     assert codice == 1
     assert errori.startswith("Errore: Risposta inattesa da http://localhost:1234/v1/models") \
         and "Traceback" not in errori
+
+
+def test_main_errore_mcp_all_avvio_uscita_1(monkeypatch):
+    for nome, valore in VALIDO.items():
+        monkeypatch.setenv(nome, valore)
+    monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
+    def discovery_fallita():
+        raise ErroreMCP("server MCP calcolatrice non avviato (python -m calcolatrice_mcp): Connection closed")
+    monkeypatch.setattr(avvio, "carica_strumenti_mcp", discovery_fallita)
+    codice, errori = esegui_main_con_errore(monkeypatch)
+    assert codice == 1
+    assert errori.startswith("Errore: server MCP calcolatrice non avviato") and "Traceback" not in errori
+
+
+def test_main_passa_al_grafo_l_orologio_e_gli_strumenti_mcp(monkeypatch):
+    usa_flussi_finti(monkeypatch)
+    for nome, valore in VALIDO.items():
+        monkeypatch.setenv(nome, valore)
+    monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
+    monkeypatch.setattr(avvio, "crea_modello", lambda config: object())
+    calcola_finta = StructuredTool.from_function(func=lambda espressione: "4", name="calcola", description="prova")
+    monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [calcola_finta])
+    ricevuti = []
+    monkeypatch.setattr(avvio, "costruisci_grafo", lambda modello, strumenti: ricevuti.append(strumenti) or "grafo")
+    monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: None)
+    assert avvio.main() == 0
+    assert [s.name for s in ricevuti[0]] == ["ora_corrente", "calcola"]

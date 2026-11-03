@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import ModelloFinto, chat
 from langchain_core.messages import AIMessage
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool, ToolException, tool
 from langgraph.errors import GraphRecursionError
 
 from assistente.grafo import (
@@ -174,3 +174,49 @@ def test_risposta_con_testo_e_richiesta_va_agli_strumenti():
     mista = AIMessage("Controllo l'orologio.", tool_calls=[{"name": "ora_corrente", "args": {}, "id": "x"}])
     nuova = esegui_turno(costruisci_grafo(ModelloFinto([mista, AIMessage("ok")]), [orologio]), [], "?")
     assert nuova[2].type == "tool"
+
+
+def solleva_tool_exception(espressione: str) -> str:
+    raise ToolException("divisione per zero")
+
+
+calcola_finta = StructuredTool.from_function(func=solleva_tool_exception, name="calcola", description="prova")
+
+
+def richiesta_calcolo(id, espressione="1/0"):
+    return AIMessage("", tool_calls=[{"name": "calcola", "args": {"espressione": espressione}, "id": id}])
+
+
+def test_errore_dello_strumento_diventa_tool_message_d_errore(caplog):
+    finto = ModelloFinto([richiesta_calcolo("k1"), AIMessage("Non si può dividere per zero.")])
+    nuova = esegui_turno(costruisci_grafo(finto, [calcola_finta]), [], "Quanto fa 1/0?")
+    assert [m.type for m in nuova] == ["human", "ai", "tool", "ai"]
+    assert (nuova[2].content, nuova[2].status, nuova[2].tool_call_id, nuova[2].name) == \
+        ("Errore: divisione per zero", "error", "k1", "calcola")
+    assert len(finto.chiamate) == 2 and finto.chiamate[1][-1].type == "tool"
+    assert "nodo_strumenti: errore dello strumento calcola: divisione per zero" in \
+        [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+
+
+def test_le_altre_eccezioni_dello_strumento_annullano_il_turno():
+    def rotto(espressione: str) -> str:
+        raise RuntimeError("difetto")
+    strumento = StructuredTool.from_function(func=rotto, name="calcola", description="prova")
+    with pytest.raises(RuntimeError):
+        esegui_turno(costruisci_grafo(ModelloFinto([richiesta_calcolo("k1")]), [strumento]), [], "?")
+
+
+def test_un_errore_non_blocca_le_altre_richieste():
+    doppia = AIMessage("", tool_calls=[{"name": "calcola", "args": {"espressione": "1/0"}, "id": "a"},
+                                       {"name": "ora_corrente", "args": {}, "id": "b"}])
+    finto = ModelloFinto([doppia, AIMessage("ok")])
+    nuova = esegui_turno(costruisci_grafo(finto, [calcola_finta, orologio]), [], "?")
+    risposte = [m for m in nuova if m.type == "tool"]
+    assert [(m.tool_call_id, m.status) for m in risposte] == [("a", "error"), ("b", "success")]
+    assert risposte[1].content == "lunedì 2026-10-26T16:42:10+01:00 (Europe/Rome)"
+
+
+def test_il_prompt_chiede_la_calcolatrice_e_conserva_l_orologio():
+    assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
+    assert "senza inventare un risultato" in PROMPT_DI_SISTEMA
+    assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
