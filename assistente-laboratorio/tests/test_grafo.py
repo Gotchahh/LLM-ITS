@@ -15,6 +15,7 @@ from assistente.grafo import (
     costruisci_grafo,
     esegui_turno,
 )
+from assistente.convertitore import crea_strumento_convertitore
 from assistente.strumenti import crea_strumento_orologio
 
 orologio = crea_strumento_orologio(
@@ -220,3 +221,38 @@ def test_il_prompt_chiede_la_calcolatrice_e_conserva_l_orologio():
     assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
     assert "senza inventare un risultato" in PROMPT_DI_SISTEMA
     assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
+
+
+def test_il_prompt_chiede_il_convertitore():
+    assert "chiama lo strumento converti" in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
+    assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
+    assert "senza inventare un risultato" in PROMPT_DI_SISTEMA
+
+
+def richiesta_conversione(id, args):
+    return AIMessage("", tool_calls=[{"name": "converti", "args": args, "id": id}])
+
+
+def test_percorso_con_il_convertitore(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([
+        richiesta_conversione("v1", {"valore": 25, "da": "m", "a": "km"}),
+        AIMessage("25 metri sono 0,025 km."),
+    ])
+    nuova = esegui_turno(costruisci_grafo(finto, [crea_strumento_convertitore()]), [], "Quanti km sono 25 metri?")
+    assert [m.type for m in nuova] == ["human", "ai", "tool", "ai"]
+    assert nuova[2].tool_call_id == "v1"
+    assert nuova[2].content == "25 m = 0,025 km" and nuova[2].status == "success"
+    assert "nodo_strumenti: converti -> 25 m = 0,025 km" in caplog.messages
+
+
+@pytest.mark.parametrize("args, atteso", [
+    ({"valore": 5, "da": "kg", "a": "m"}, "peso"),
+    ({"valore": "tanti", "da": "m", "a": "km"}, "numero"),
+])
+def test_conversione_impossibile_diventa_errore(args, atteso):
+    finto = ModelloFinto([richiesta_conversione("v2", args), AIMessage("Non si può.")])
+    nuova = esegui_turno(costruisci_grafo(finto, [crea_strumento_convertitore()]), [], "converti")
+    assert nuova[2].tool_call_id == "v2" and nuova[2].status == "error"
+    assert nuova[2].content.startswith("Errore: ") and atteso in nuova[2].content

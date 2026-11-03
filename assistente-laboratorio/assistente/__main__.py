@@ -12,6 +12,7 @@ from assistente.config import (
     configura_log,
     leggi_file_env,
 )
+from assistente.convertitore import crea_strumento_convertitore
 from assistente.grafo import costruisci_grafo
 from assistente.modello import (
     ErroreServer,
@@ -38,7 +39,8 @@ def main() -> int:
     except (ErroreConfigurazione, ErroreServer, ErroreMCP) as errore:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1
-    grafo = costruisci_grafo(crea_modello(config), [crea_strumento_orologio(config.fuso), *strumenti_mcp])
+    strumenti = [crea_strumento_orologio(config.fuso), crea_strumento_convertitore(), *strumenti_mcp]
+    grafo = costruisci_grafo(crea_modello(config), strumenti)
     esegui_chat(
         grafo,
         config.base_url,
