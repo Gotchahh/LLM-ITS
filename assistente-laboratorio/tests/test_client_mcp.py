@@ -1,8 +1,12 @@
+import _thread
+import asyncio
 import logging
+import threading
 
 import pytest
 from langchain_core.tools import StructuredTool, ToolException
 
+from assistente import client_mcp
 from assistente.client_mcp import ErroreMCP, ErroreTrasportoMCP, carica_strumenti_mcp, rendi_sincrono
 
 
@@ -75,9 +79,44 @@ def test_tool_exception_dentro_un_gruppo_resta_validazione():
     assert str(errore.value) == "divisione per zero" and not isinstance(errore.value, ErroreTrasportoMCP)
 
 
-def test_ctrl_c_non_diventa_un_errore_di_trasporto():
+async def attesa_che_trasforma_la_cancellazione():
+    """Come anyio/mcp a sessione aperta: la cancellazione del task diventa un'eccezione ordinaria."""
+    try:
+        await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        raise RuntimeError("BrokenResourceError simulato") from None
+
+
+def ctrl_c_tra(secondi):
+    """Simula Ctrl+C: `interrupt_main` usa lo stesso gestore di SIGINT di un Ctrl+C vero."""
+    timer = threading.Timer(secondi, _thread.interrupt_main)
+    timer.start()
+    return timer
+
+
+def test_ctrl_c_durante_la_chiamata_non_diventa_un_errore_di_trasporto():
+    async def calcolo_lento(**argomenti):
+        await attesa_che_trasforma_la_cancellazione()
+    strumento = StructuredTool(name="calcola", description="prova", args_schema=SCHEMA, coroutine=calcolo_lento)
+    timer = ctrl_c_tra(0.2)
     with pytest.raises(KeyboardInterrupt):
-        rendi_sincrono(strumento_che_solleva(KeyboardInterrupt())).invoke({"espressione": "1"})
+        rendi_sincrono(strumento).invoke({"espressione": "1"})
+    timer.join()
+
+
+def test_ctrl_c_durante_la_discovery_non_diventa_un_errore_mcp(monkeypatch):
+    class ClientLento:
+        def __init__(self, *argomenti, **opzioni):
+            pass
+
+        async def get_tools(self):
+            await attesa_che_trasforma_la_cancellazione()
+
+    monkeypatch.setattr(client_mcp, "MultiServerMCPClient", ClientLento)
+    timer = ctrl_c_tra(0.2)
+    with pytest.raises(KeyboardInterrupt):
+        carica_strumenti_mcp()
+    timer.join()
 
 
 def test_discovery_da_un_altra_cartella(monkeypatch, tmp_path):

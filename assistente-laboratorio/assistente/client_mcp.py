@@ -46,6 +46,25 @@ def _dettaglio(errore: BaseException) -> str:
     return str(foglia) or type(foglia).__name__
 
 
+def _esegui(attesa):
+    """Esegue una coroutine con `asyncio.run` senza perdere un Ctrl+C.
+
+    Con Ctrl+C `asyncio.run` cancella il task, e rilancia `KeyboardInterrupt` solo se il task termina con
+    `CancelledError`; a sessione aperta, anyio e mcp trasformano invece la cancellazione in un'eccezione
+    ordinaria (un gruppo con `BrokenResourceError`). Qui la si riporta a `CancelledError`.
+    """
+    async def principale():
+        try:
+            return await attesa
+        except Exception:
+            compito = asyncio.current_task()
+            if compito is not None and compito.cancelling():
+                raise asyncio.CancelledError from None
+            raise
+
+    return asyncio.run(principale())
+
+
 def _testo(contenuto) -> str:
     """Converte il contenuto di una risposta MCP (stringa o blocchi di testo) in una stringa."""
     if isinstance(contenuto, str):
@@ -69,7 +88,7 @@ def rendi_sincrono(strumento_mcp: BaseTool) -> BaseTool:
     def esegui(**argomenti) -> str:
         inizio = time.perf_counter()
         try:
-            contenuto = asyncio.run(strumento_mcp.ainvoke(argomenti))
+            contenuto = _esegui(strumento_mcp.ainvoke(argomenti))
         except Exception as errore:
             foglia = _prima_foglia(errore)
             if isinstance(foglia, ToolException):
@@ -104,7 +123,7 @@ def carica_strumenti_mcp(argomenti: Sequence[str] = ARGOMENTI_SERVER) -> list[Ba
     client = MultiServerMCPClient({NOME_SERVER: connessione}, handle_tool_errors=False)
     inizio = time.perf_counter()
     try:
-        strumenti = asyncio.run(client.get_tools())
+        strumenti = _esegui(client.get_tools())
     except Exception as errore:
         raise ErroreMCP(f"server MCP {NOME_SERVER} non avviato ({comando}): {_dettaglio(errore)}") from errore
     if not strumenti:
