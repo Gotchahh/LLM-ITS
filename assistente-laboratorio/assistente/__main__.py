@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from assistente.cli import crea_indicatore_attesa, esegui_chat, prepara_terminale
+from assistente.client_mcp import ErroreMCP, carica_strumenti_mcp
 from assistente.config import (
     ErroreConfigurazione,
     carica_configurazione,
@@ -22,9 +23,10 @@ from assistente.strumenti import crea_strumento_orologio
 
 
 def main() -> int:
-    """Legge la configurazione, controlla il server e il modello, poi avvia la chat.
+    """Legge la configurazione, controlla il server e il modello, carica gli strumenti MCP, poi avvia la chat.
 
-    Restituisce 1 se la configurazione non è valida o LM Studio non è raggiungibile.
+    Restituisce 1 se la configurazione non è valida, LM Studio non è raggiungibile
+    o il server MCP della calcolatrice non parte.
     """
     prepara_terminale(sys.stdin, sys.stdout, sys.stderr)
     try:
@@ -32,10 +34,11 @@ def main() -> int:
         config = carica_configurazione(ambiente)
         configura_log(config.livello_log)
         verifica_modello(config.modello, leggi_modelli_disponibili(config.base_url))
-    except (ErroreConfigurazione, ErroreServer) as errore:
+        strumenti_mcp = carica_strumenti_mcp()
+    except (ErroreConfigurazione, ErroreServer, ErroreMCP) as errore:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1
-    grafo = costruisci_grafo(crea_modello(config), [crea_strumento_orologio(config.fuso)])
+    grafo = costruisci_grafo(crea_modello(config), [crea_strumento_orologio(config.fuso), *strumenti_mcp])
     esegui_chat(
         grafo,
         config.base_url,
