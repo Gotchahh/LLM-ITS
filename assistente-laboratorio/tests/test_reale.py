@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from assistente.client_mcp import carica_strumenti_mcp
 from assistente.config import carica_configurazione, leggi_file_env
 from assistente.grafo import costruisci_grafo, esegui_turno
 from assistente.modello import crea_modello, leggi_modelli_disponibili, verifica_modello
@@ -20,7 +21,7 @@ def grafo():
     """Grafo collegato al modello reale, con la configurazione di `.env` e dell'ambiente come in `main`."""
     config = carica_configurazione({**leggi_file_env(FILE_ENV), **os.environ})
     verifica_modello(config.modello, leggi_modelli_disponibili(config.base_url))
-    return costruisci_grafo(crea_modello(config), [crea_strumento_orologio(config.fuso)])
+    return costruisci_grafo(crea_modello(config), [crea_strumento_orologio(config.fuso), *carica_strumenti_mcp()])
 
 
 def test_reale_risposta_ordinaria(grafo):
@@ -55,3 +56,9 @@ def test_reale_ora_di_un_altra_citta(grafo):
     cronologia = esegui_turno(grafo, [], "Che ore sono a New York?")
     risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "ora_corrente"]
     assert any(r.endswith("(America/New_York)") for r in risultati)
+
+
+def test_reale_calcolo(grafo):
+    cronologia = esegui_turno(grafo, [], "Quanto fa 12,5 per 8 meno 3?")
+    risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "calcola"]
+    assert "97" in risultati and "97" in cronologia[-1].text
