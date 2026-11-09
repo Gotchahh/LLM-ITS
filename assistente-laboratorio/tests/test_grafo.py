@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import ModelloFinto, chat
+from conftest import ModelloFinto, chat, porta_libera
 from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool, ToolException, tool
 from langgraph.errors import GraphRecursionError
@@ -17,6 +17,7 @@ from assistente.grafo import (
 )
 from assistente.calendario import crea_strumenti_calendario
 from assistente.convertitore import crea_strumento_convertitore
+from assistente.note import crea_strumenti_note
 from assistente.strumenti import crea_strumento_orologio
 
 orologio = crea_strumento_orologio(
@@ -298,3 +299,31 @@ def test_errori_del_calendario_diventano_tool_message_d_errore(nome, args, attes
     nuova = esegui_turno(costruisci_grafo(finto, strumenti_del_calendario()), [], "?")
     assert nuova[2].tool_call_id == "d2" and nuova[2].status == "error"
     assert nuova[2].content.startswith("Errore: ") and atteso in nuova[2].content
+
+
+def test_il_prompt_chiede_gli_strumenti_delle_note():
+    for testo in ["salva_nota", "elenca_note", "cancella_nota", "giorni_tra"]:
+        assert testo in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento converti" in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
+    assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
+
+
+def richiesta_nota(id):
+    return AIMessage("", tool_calls=[{"name": "salva_nota", "args": {"testo": "calibrare il microscopio 2"}, "id": id}])
+
+
+def test_percorso_con_le_note(servizio_note, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([richiesta_nota("n1"), AIMessage("Fatto.")])
+    strumenti = crea_strumenti_note(servizio_note, ZoneInfo("Europe/Rome"))
+    nuova = esegui_turno(costruisci_grafo(finto, strumenti), [], "Segnati il microscopio")
+    assert nuova[2].tool_call_id == "n1" and nuova[2].status == "success" and "salvata" in nuova[2].content
+    assert any(m.startswith("nodo_strumenti: salva_nota -> ") for m in caplog.messages)
+
+
+def test_servizio_note_spento_diventa_errore():
+    finto = ModelloFinto([richiesta_nota("n2"), AIMessage("Non posso.")])
+    strumenti = crea_strumenti_note(f"http://127.0.0.1:{porta_libera()}", ZoneInfo("Europe/Rome"))
+    nuova = esegui_turno(costruisci_grafo(finto, strumenti), [], "Segnati il microscopio")
+    assert nuova[2].status == "error" and "non raggiungibile" in nuova[2].content

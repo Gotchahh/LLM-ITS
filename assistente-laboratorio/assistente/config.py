@@ -14,6 +14,8 @@ VARIABILE_URL = "LMSTUDIO_BASE_URL"
 VARIABILE_MODELLO = "LMSTUDIO_MODEL"
 VARIABILE_FUSO = "APP_TIMEZONE"
 VARIABILE_LOG = "LOG_LEVEL"
+VARIABILE_NOTE = "NOTE_API_URL"
+NOTE_URL_PREDEFINITO = "http://localhost:8000"
 
 OBBLIGATORIE = (VARIABILE_URL, VARIABILE_MODELLO, VARIABILE_FUSO)
 LIVELLI_LOG = ("DEBUG", "INFO", "WARNING", "ERROR")
@@ -32,6 +34,7 @@ class Configurazione:
     modello: str
     fuso: ZoneInfo
     livello_log: str
+    note_url: str = NOTE_URL_PREDEFINITO
 
 
 def leggi_file_env(percorso: Path) -> dict[str, str]:
@@ -51,12 +54,27 @@ def leggi_file_env(percorso: Path) -> dict[str, str]:
     return {chiave: valore for chiave, valore in valori.items() if valore is not None}
 
 
+def _indirizzo(nome: str, valore: str, esempio: str) -> str:
+    """Indirizzo http(s) senza barra finale, o ErroreConfigurazione che nomina la variabile."""
+    pulito = valore.rstrip("/")
+    try:
+        indirizzo = urlparse(pulito)
+        valido = indirizzo.scheme in ("http", "https") and bool(indirizzo.netloc)
+    except ValueError:  # per esempio parentesi quadre non chiuse, come in http://[::1/v1
+        valido = False
+    if not valido:
+        raise ErroreConfigurazione(
+            f"{nome} non è un indirizzo valido: «{valore}». Serve lo schema, per esempio {esempio}."
+        )
+    return pulito
+
+
 def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
     """Valida le variabili d'ambiente e costruisce la configurazione.
 
     Gli spazi ai bordi sono tolti e un valore vuoto equivale a una variabile mancante.
     """
-    valori = {nome: ambiente.get(nome, "").strip() for nome in (*OBBLIGATORIE, VARIABILE_LOG)}
+    valori = {nome: ambiente.get(nome, "").strip() for nome in (*OBBLIGATORIE, VARIABILE_LOG, VARIABILE_NOTE)}
 
     mancanti = [nome for nome in OBBLIGATORIE if not valori[nome]]
     if mancanti:
@@ -65,17 +83,8 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
             "Copiare .env.example in .env e compilarlo (Copy-Item .env.example .env)."
         )
 
-    base_url = valori[VARIABILE_URL].rstrip("/")
-    try:
-        indirizzo = urlparse(base_url)
-        valido = indirizzo.scheme in ("http", "https") and bool(indirizzo.netloc)
-    except ValueError:  # per esempio parentesi quadre non chiuse, come in http://[::1/v1
-        valido = False
-    if not valido:
-        raise ErroreConfigurazione(
-            f"{VARIABILE_URL} non è un indirizzo valido: «{valori[VARIABILE_URL]}». "
-            "Serve lo schema, per esempio http://localhost:1234/v1."
-        )
+    base_url = _indirizzo(VARIABILE_URL, valori[VARIABILE_URL], "http://localhost:1234/v1")
+    note_url = _indirizzo(VARIABILE_NOTE, valori[VARIABILE_NOTE] or NOTE_URL_PREDEFINITO, NOTE_URL_PREDEFINITO)
 
     try:
         fuso = ZoneInfo(valori[VARIABILE_FUSO])
@@ -97,6 +106,7 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
         modello=valori[VARIABILE_MODELLO],
         fuso=fuso,
         livello_log=livello_log,
+        note_url=note_url,
     )
 
 

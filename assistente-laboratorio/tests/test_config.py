@@ -133,3 +133,11 @@ def test_modalita_log_tocca_solo_i_log_dell_applicazione(log_isolati):
     ModalitaLog("WARNING").alterna()
     assert logging.getLogger("assistente.grafo").isEnabledFor(logging.INFO)
     assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
+
+
+def test_indirizzo_delle_note():
+    assert carica_configurazione(VALIDO).note_url == "http://localhost:8000"
+    assert carica_configurazione({**VALIDO, "NOTE_API_URL": " "}).note_url == "http://localhost:8000"
+    assert carica_configurazione({**VALIDO, "NOTE_API_URL": "http://note:8000/"}).note_url == "http://note:8000"
+    with pytest.raises(ErroreConfigurazione, match="NOTE_API_URL"):
+        carica_configurazione({**VALIDO, "NOTE_API_URL": "note:8000"})

@@ -5,13 +5,14 @@ Il grafo inoltra la conversazione al modello locale servito da LM Studio e conse
 cronologia per la durata della sessione (nessuna persistenza). Il modello può chiedere lo
 strumento orologio `ora_corrente`, i quattro strumenti del calendario `giorni_tra`, `sposta_data`,
 `giorno_settimana` e `pasqua` (vedi «Giorni e scadenze»), il convertitore di unità `converti` (vedi «Convertitore») e lo strumento
-`calcola` della calcolatrice, offerto da un server MCP (vedi «Calcolatrice»); il programma li esegue davvero.
+`calcola` della calcolatrice, offerto da un server MCP (vedi «Calcolatrice»), e gli strumenti delle note
+`salva_nota`, `elenca_note` e `cancella_nota`, offerti da un'API FastAPI (vedi «Note»); il programma li esegue davvero.
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
 in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
 mancante sono del 02/11/2026; riprovati lo stesso giorno, con lo stesso esito, anche i messaggi d'errore della
-Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze del 09/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
+Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze e delle note del 09/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -53,6 +54,7 @@ Se `.env` esiste già il comando lo sovrascrive: in quel caso modificare il file
 | `LMSTUDIO_MODEL` | `google/gemma-4-e4b` | Identificativo del modello, uguale a quello restituito da `GET /v1/models` |
 | `APP_TIMEZONE` | `Europe/Rome` | Fuso orario IANA per lo strumento orologio |
 | `LOG_LEVEL` | `INFO` | Facoltativa (default `INFO`), maiuscole o minuscole |
+| `NOTE_API_URL` | `http://localhost:8000` | Facoltativa (default `http://localhost:8000`): indirizzo del servizio delle note |
 
 Le prime tre sono obbligatorie: se mancano o sono vuote, l'errore le elenca e rimanda a `.env.example`.
 
@@ -101,7 +103,7 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 .\.venv\Scripts\python.exe -m pytest -m reale -v
 ```
 
-Sono nove prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
+Sono dieci prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
 precedente, due domande sull'ora nella stessa sessione (almeno una richiesta di `ora_corrente` per turno: il modello può
 chiamarla più volte nello stesso turno), l'ora
 di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`) e un calcolo («Quanto fa 12,5 per 8
@@ -109,11 +111,17 @@ meno 3?»: il risultato `97` deve venire dallo strumento `calcola` e comparire n
 («Quanti metri sono 4 cm?» e «Quanti gradi Fahrenheit sono 20 °C?»: i risultati `4 cm = 0,04 m` e `20 °C = 68 °F`
 devono venire dallo strumento `converti`, e `0,04` e `68` comparire nella risposta), i giorni che mancano al
 25 dicembre (il risultato di `giorni_tra` deve coincidere con il numero calcolato sulla data reale di oggi, che deve
-comparire nella risposta) e la Pasqua del 2027 (`pasqua` deve restituire `Pasqua 2027: domenica 28 marzo 2027` e
-la risposta contenere `28 marzo`).
-Con un modello locale possono richiedere diversi minuti (il 09/11/2026, con `google/gemma-4-e4b`, 399 s; ogni prova
+comparire nella risposta), la Pasqua del 2027 (`pasqua` deve restituire `Pasqua 2027: domenica 28 marzo 2027` e
+la risposta contenere `28 marzo`) e le note («Segnati che il microscopio 2 va calibrato.» deve produrre un
+`salva_nota` riuscito e, in una conversazione nuova, «Che note ho?» un `elenca_note` con la nota e la parola
+`microscopio` nella risposta; il test avvia da sé il servizio su un DB temporaneo).
+Con un modello locale possono richiedere diversi minuti (il 09/11/2026, con `google/gemma-4-e4b`, 412 s; ogni prova
 fa più chiamate al modello e la prima carica il modello). Se il modello non chiama lo strumento la prova fallisce:
 il fallimento va riportato, non aggirato.
+
+I test delle note (senza modello) sono in `tests/test_note_api.py` (il servizio con il `TestClient` di FastAPI su un
+DB temporaneo), `tests/test_note.py` (gli strumenti contro un vero uvicorn avviato dai test, anche spento) e in
+`tests/test_grafo.py`.
 
 I test di giorni e scadenze (senza modello, con oggi fissato al 03/11/2026) sono in `tests/test_calendario.py`
 (lettura delle date, conteggi, anni bisestili, Pasqua, errori, oggi nel fuso configurato vicino alla mezzanotte) e
@@ -308,6 +316,55 @@ Tu> Assistente> Mancano 46 giorni al 25 dicembre (venerdì 25 dicembre 2026).
 Tu> Assistente> Pasqua nel 2027 cade di domenica 28 marzo 2027.
 ```
 
+## Note (API FastAPI)
+
+Il modello può salvare, elencare e cancellare note con tre strumenti: `salva_nota(testo)`, `elenca_note(cerca)`
+(`cerca` facoltativo, senza distinzione di maiuscole) e `cancella_nota(numero)`. Le note **restano** dopo la chiusura
+dell'assistente; la cronologia della chat invece no. Le salva un servizio separato, `note_api/`: un'API FastAPI con
+un file SQLite, che l'assistente chiama via HTTP con `urllib` (`assistente/note.py`).
+
+Perché un'API e non una funzione nel grafo o MCP: le note sono dati con stato che appartengono a un servizio con un
+proprio ciclo di vita (in Docker un container separato con il suo volume); un'API HTTP le rende disponibili a
+qualsiasi client.
+
+Avvio locale in **due terminali**. Nel primo il servizio (lasciarlo aperto; si ferma con Ctrl+C):
+
+```powershell
+.\.venv\Scripts\python.exe -m note_api
+```
+
+Nel secondo l'assistente, come in «Avvio». Variabili del servizio, tutte facoltative: `NOTE_DB` (file SQLite,
+default `dati/note.db`, cartella creata se manca ed esclusa da Git), `NOTE_HOST` (default `127.0.0.1`),
+`NOTE_PORT` (default `8000`). L'assistente trova il servizio con `NOTE_API_URL` (vedi «Configurazione»).
+
+Endpoint (JSON): `GET /salute`; `POST /note` con `{"testo": "..."}` (da 1 a 500 caratteri, spazi esterni tolti);
+`GET /note?cerca=...` (al massimo 20 note, dalla più recente, con il totale); `DELETE /note/{numero}`. Ogni errore ha
+il corpo `{"errore": "<messaggio in italiano>"}` (`400` testo o numero non validi, `404` nota inesistente).
+
+Errori che il modello riceve e deve spiegare senza inventare note: servizio spento (`servizio note non
+raggiungibile a http://localhost:8000: avviarlo con python -m note_api`), nota inesistente (`nessuna nota con numero
+3`), testo vuoto o troppo lungo. Se il servizio non risponde all'avvio, l'assistente parte comunque con un avviso.
+
+Prova reale da pipe del 09/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`), in tre sessioni separate: le prime due
+con il servizio avviato su un DB di prova (`NOTE_DB`), la terza con il servizio spento:
+
+```text
+[INFO] instradamento: richiesta strumento salva_nota {"testo": "il microscopio 2 va calibrato"}
+[INFO] nodo_strumenti: salva_nota -> nota 1 salvata: «il microscopio 2 va calibrato»
+Tu> Assistente> Ho salvato la nota: "il microscopio 2 va calibrato".
+
+[INFO] instradamento: richiesta strumento elenca_note {}
+[INFO] nodo_strumenti: elenca_note -> 1 nota: n. 1 (9/11/2026 11:24) il microscopio 2 va calibrato
+[INFO] instradamento: richiesta strumento cancella_nota {"numero": 1}
+[INFO] nodo_strumenti: cancella_nota -> nota 1 cancellata: «il microscopio 2 va calibrato»
+Tu> Assistente> Ho cancellato la nota n. 1 ("il microscopio 2 va calibrato").
+
+[WARNING] servizio note non raggiungibile a http://localhost:8000: gli strumenti delle note risponderanno con un errore
+[INFO] instradamento: richiesta strumento salva_nota {"testo": "la centrifuga fa rumore"}
+[WARNING] nodo_strumenti: errore dello strumento salva_nota: servizio note non raggiungibile a http://localhost:8000: avviarlo con python -m note_api
+Tu> Assistente> Mi dispiace, ma non è stato possibile salvare la nota perché il servizio delle note non risulta raggiungibile.
+```
+
 ## Convertitore (funzione nel grafo)
 
 Per le conversioni di unità il modello chiede lo strumento `converti`, con tre argomenti: `valore` (un numero),
@@ -465,7 +522,9 @@ rispondere) e un `.env` compilato come in «Configurazione».
 - `Dockerfile`: immagine `python:3.14.7-slim`, dipendenze installate da `requirements.txt` prima della copia del
   codice (cache dei layer), copia di `assistente/`, avvio con `python -m assistente`. `requirements-dev.txt` e i
   test restano fuori dall'immagine.
-- `compose.yaml`: servizio `assistente` con le variabili di `.env`, ma con `LMSTUDIO_BASE_URL` impostata a
+- `compose.yaml`: servizio `note` (stessa immagine, `python -m note_api`, note nel volume `note-dati` su `/app/dati`)
+  e servizio `assistente` con `NOTE_API_URL=http://note:8000` e `depends_on: note`, così `docker compose run`
+  avvia anche il servizio delle note; `assistente` ha le variabili di `.env`, ma con `LMSTUDIO_BASE_URL` impostata a
   `http://host.docker.internal:1234/v1` (nel container `localhost` è il container stesso, non il computer host),
   `stdin_open` e `tty` per la chat da tastiera, `host.docker.internal` mappato sull'host; nessuna porta pubblicata.
 - `.dockerignore`: `.env`, `.venv`, cache, `.git`, `tests`, `docs` non entrano nell'immagine. Il `.env` arriva al
@@ -501,6 +560,11 @@ Tu> Alla prossima!
 
 Il container ha raggiunto LM Studio sull'host e la richiesta di `ora_corrente` e la sua esecuzione compaiono
 nei log come in locale. Con l'input da pipe la scritta `Ragionando...` non compare.
+
+Note in Docker: la prova da pipe del 09/11/2026 ha salvato una nota in una sessione e l'ha ritrovata in una seconda
+sessione (`docker compose run --rm -T -e LOG_LEVEL=INFO assistente`, due volte), con le stesse righe di log della
+sezione «Note». `docker compose down` ferma e rimuove anche il container `note`, ma il volume resta (`docker volume
+ls --filter name=note-dati` mostra `assistente-laboratorio_note-dati`).
 
 Chat interattiva: si avvia con `run`, non con `up` (vedi «Diagnosi»).
 
@@ -549,6 +613,10 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
 
 ## Diagnosi
 
+- **Le note non funzionano** («servizio note non raggiungibile ...» nel log o nella risposta): in locale avviare
+  `.\.venv\Scripts\python.exe -m note_api` in un secondo terminale e controllare `NOTE_API_URL`. Con il servizio
+  spento l'assistente parte comunque, con un avviso; su Windows l'avvio richiede qualche secondo in più per i
+  tentativi di connessione.
 - **Il server non è disponibile**: l'avvio termina con
   `Errore: Impossibile leggere l'elenco dei modelli da http://.../v1/models: ...` e codice 1. Avviare il
   server locale in LM Studio e controllare `LMSTUDIO_BASE_URL`. Provato con `LMSTUDIO_BASE_URL=http://localhost:9/v1`:

@@ -12,6 +12,7 @@ from assistente.config import carica_configurazione, leggi_file_env
 from assistente.convertitore import crea_strumento_convertitore
 from assistente.grafo import costruisci_grafo, esegui_turno
 from assistente.modello import crea_modello, leggi_modelli_disponibili, verifica_modello
+from assistente.note import crea_strumenti_note
 from assistente.strumenti import crea_strumento_orologio
 
 pytestmark = pytest.mark.reale
@@ -26,13 +27,14 @@ def config():
 
 
 @pytest.fixture(scope="module")
-def grafo(config):
+def grafo(config, servizio_note):
     """Grafo collegato al modello reale, con gli stessi strumenti di `main`."""
     verifica_modello(config.modello, leggi_modelli_disponibili(config.base_url))
     strumenti = [
         crea_strumento_orologio(config.fuso),
         *crea_strumenti_calendario(config.fuso),
         crea_strumento_convertitore(),
+        *crea_strumenti_note(servizio_note, config.fuso),
         *carica_strumenti_mcp(),
     ]
     return costruisci_grafo(crea_modello(config), strumenti)
@@ -105,3 +107,13 @@ def test_reale_pasqua_2027(grafo):
     risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "pasqua"]
     assert "Pasqua 2027: domenica 28 marzo 2027" in risultati
     assert "28 marzo" in cronologia[-1].text
+
+
+def test_reale_note(grafo):
+    salvataggio = esegui_turno(grafo, [], "Segnati che il microscopio 2 va calibrato.")
+    salvate = [m for m in salvataggio if m.type == "tool" and m.name == "salva_nota"]
+    assert any(m.status == "success" for m in salvate)
+    elenco = esegui_turno(grafo, [], "Che note ho?")
+    risultati = [m.content for m in elenco if m.type == "tool" and m.name == "elenca_note"]
+    assert any("microscopio 2" in r for r in risultati)
+    assert "microscopio" in elenco[-1].text.lower()

@@ -11,6 +11,12 @@ from langchain_core.tools import StructuredTool
 import assistente.__main__ as avvio
 from assistente.client_mcp import ErroreMCP
 
+
+@pytest.fixture(autouse=True)
+def servizio_note_presente(monkeypatch):
+    """Nessuna connessione vera al servizio delle note (su Windows un rifiuto costa circa 2 s)."""
+    monkeypatch.setattr(avvio, "servizio_raggiungibile", lambda url: True)
+
 VARIABILI = (*VALIDO, "LOG_LEVEL")
 
 
@@ -131,4 +137,23 @@ def test_main_passa_al_grafo_l_orologio_e_gli_strumenti_mcp(monkeypatch):
     monkeypatch.setattr(avvio, "costruisci_grafo", lambda modello, strumenti: ricevuti.append(strumenti) or "grafo")
     monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: None)
     assert avvio.main() == 0
-    assert [s.name for s in ricevuti[0]] == ["ora_corrente", "giorni_tra", "sposta_data", "giorno_settimana", "pasqua", "converti", "calcola"]
+    assert [s.name for s in ricevuti[0]] == [
+        "ora_corrente", "giorni_tra", "sposta_data", "giorno_settimana", "pasqua", "converti",
+        "salva_nota", "elenca_note", "cancella_nota", "calcola",
+    ]
+
+
+def test_main_con_servizio_note_spento_avvisa_e_parte(monkeypatch, caplog):
+    usa_flussi_finti(monkeypatch)
+    for nome, valore in VALIDO.items():
+        monkeypatch.setenv(nome, valore)
+    monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
+    monkeypatch.setattr(avvio, "crea_modello", lambda config: object())
+    monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
+    monkeypatch.setattr(avvio, "costruisci_grafo", lambda modello, strumenti: "grafo")
+    avviata = []
+    monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: avviata.append(True))
+    monkeypatch.setattr(avvio, "servizio_raggiungibile", lambda url: False)
+    assert avvio.main() == 0
+    assert avviata == [True]
+    assert any("servizio note non raggiungibile" in m for m in caplog.messages)
