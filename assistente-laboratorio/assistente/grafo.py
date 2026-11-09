@@ -38,7 +38,11 @@ PROMPT_DI_SISTEMA = (
     "Per salvare, elencare, cercare o cancellare note chiama salva_nota, elenca_note o cancella_nota; "
     "per cancellare una nota indicata per argomento chiama prima elenca_note per trovarne il numero. "
     "Non dire mai che una nota è salvata o cancellata senza il risultato dello strumento e, "
-    "se lo strumento restituisce un errore, di' che non si può fare e perché."
+    "se lo strumento restituisce un errore, di' che non si può fare e perché. "
+    "Per domande sugli apparecchi del laboratorio (dove si trovano, stato, calibrazione, "
+    "che cosa c'è in una stanza) chiama cerca_apparecchi, dettaglio_apparecchio o elenca_apparecchi "
+    "e rispondi solo con quello che restituiscono; se lo strumento dà un errore o nessun risultato, "
+    "dillo senza inventare apparecchi."
 )
 
 

@@ -55,3 +55,20 @@ def test_limite_di_passaggi_con_lo_strumento_mcp(strumenti):
     finto = ModelloFinto([richiesta_calcolo(f"l{i}", "1+1") for i in range(20)])
     with pytest.raises(GraphRecursionError):
         esegui_turno(costruisci_grafo(finto, strumenti), [], "?")
+
+
+def richiesta(id, nome, args):
+    return AIMessage("", tool_calls=[{"name": nome, "args": args, "id": id}])
+
+
+def test_catalogo_con_il_server_vero(strumenti):
+    finto = ModelloFinto([
+        richiesta("k9", "elenca_apparecchi", {"stato": "in manutenzione"}),
+        richiesta("k10", "dettaglio_apparecchio", {"codice": "XYZ-99"}),
+        AIMessage("Ecco."),
+    ])
+    nuova = esegui_turno(costruisci_grafo(finto, strumenti), [], "Che cosa è in manutenzione?")
+    elenco, errore = nuova[2], nuova[4]
+    assert elenco.tool_call_id == "k9" and elenco.status == "success" and "MIC-02" in elenco.content
+    assert errore.tool_call_id == "k10" and errore.status == "error"
+    assert errore.content == "Errore: nessun apparecchio con codice «XYZ-99»"

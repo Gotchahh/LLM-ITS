@@ -327,3 +327,11 @@ def test_servizio_note_spento_diventa_errore():
     strumenti = crea_strumenti_note(f"http://127.0.0.1:{porta_libera()}", ZoneInfo("Europe/Rome"))
     nuova = esegui_turno(costruisci_grafo(finto, strumenti), [], "Segnati il microscopio")
     assert nuova[2].status == "error" and "non raggiungibile" in nuova[2].content
+
+
+def test_il_prompt_chiede_il_catalogo():
+    for testo in ["cerca_apparecchi", "dettaglio_apparecchio", "elenca_apparecchi", "giorni_tra", "salva_nota"]:
+        assert testo in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento converti" in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
+    assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
