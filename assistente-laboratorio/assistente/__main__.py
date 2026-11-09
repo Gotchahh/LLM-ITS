@@ -1,5 +1,6 @@
 """Punto di ingresso: `python -m assistente`."""
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -21,7 +22,10 @@ from assistente.modello import (
     leggi_modelli_disponibili,
     verifica_modello,
 )
+from assistente.note import crea_strumenti_note, servizio_raggiungibile
 from assistente.strumenti import crea_strumento_orologio
+
+logger = logging.getLogger("assistente")
 
 
 def main() -> int:
@@ -40,10 +44,16 @@ def main() -> int:
     except (ErroreConfigurazione, ErroreServer, ErroreMCP) as errore:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1
+    if not servizio_raggiungibile(config.note_url):
+        logger.warning(
+            "servizio note non raggiungibile a %s: gli strumenti delle note risponderanno con un errore",
+            config.note_url,
+        )
     strumenti = [
         crea_strumento_orologio(config.fuso),
         *crea_strumenti_calendario(config.fuso),
         crea_strumento_convertitore(),
+        *crea_strumenti_note(config.note_url, config.fuso),
         *strumenti_mcp,
     ]
     grafo = costruisci_grafo(crea_modello(config), strumenti)

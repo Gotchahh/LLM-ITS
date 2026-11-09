@@ -34,6 +34,10 @@ PROMPT_DI_SISTEMA = (
     "per il giorno della settimana di una data chiama giorno_settimana "
     "e per la data di Pasqua chiama pasqua, passando le date come AAAA-MM-GG "
     "oppure MM-GG se l'anno non è indicato; non calcolare da te, usa il risultato così com'è e, "
+    "se lo strumento restituisce un errore, di' che non si può fare e perché. "
+    "Per salvare, elencare, cercare o cancellare note chiama salva_nota, elenca_note o cancella_nota; "
+    "per cancellare una nota indicata per argomento chiama prima elenca_note per trovarne il numero. "
+    "Non dire mai che una nota è salvata o cancellata senza il risultato dello strumento e, "
     "se lo strumento restituisce un errore, di' che non si può fare e perché."
 )
 
