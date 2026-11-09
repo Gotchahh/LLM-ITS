@@ -15,6 +15,7 @@ from assistente.grafo import (
     costruisci_grafo,
     esegui_turno,
 )
+from assistente.calendario import crea_strumenti_calendario
 from assistente.convertitore import crea_strumento_convertitore
 from assistente.strumenti import crea_strumento_orologio
 
@@ -255,4 +256,45 @@ def test_conversione_impossibile_diventa_errore(args, atteso):
     finto = ModelloFinto([richiesta_conversione("v2", args), AIMessage("Non si può.")])
     nuova = esegui_turno(costruisci_grafo(finto, [crea_strumento_convertitore()]), [], "converti")
     assert nuova[2].tool_call_id == "v2" and nuova[2].status == "error"
+    assert nuova[2].content.startswith("Errore: ") and atteso in nuova[2].content
+
+
+def test_il_prompt_chiede_gli_strumenti_del_calendario():
+    for testo in ["giorni_tra", "sposta_data", "giorno_settimana", "pasqua", "AAAA-MM-GG"]:
+        assert testo in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento converti" in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
+    assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
+
+
+def strumenti_del_calendario():
+    return crea_strumenti_calendario(ZoneInfo("Europe/Rome"), adesso=lambda: datetime(2026, 11, 3, 10, 0, tzinfo=UTC))
+
+
+def richiesta_calendario(id, nome, args):
+    return AIMessage("", tool_calls=[{"name": nome, "args": args, "id": id}])
+
+
+def test_percorso_con_il_calendario(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([
+        richiesta_calendario("d1", "giorni_tra", {"data": "12-25"}),
+        AIMessage("Mancano 52 giorni."),
+    ])
+    nuova = esegui_turno(costruisci_grafo(finto, strumenti_del_calendario()), [], "Quanti giorni a Natale?")
+    assert [m.type for m in nuova] == ["human", "ai", "tool", "ai"]
+    assert nuova[2].tool_call_id == "d1" and nuova[2].status == "success"
+    assert nuova[2].content.endswith("mancano 52 giorni")
+    assert any(m.startswith("nodo_strumenti: giorni_tra -> ") for m in caplog.messages)
+
+
+@pytest.mark.parametrize("nome, args, atteso", [
+    ("pasqua", {"anno": 1500}, "1583"),
+    ("giorni_tra", {"data": "2026-02-30"}, "non valida"),
+    ("sposta_data", {"giorni": 2.5}, "giorni"),
+])
+def test_errori_del_calendario_diventano_tool_message_d_errore(nome, args, atteso):
+    finto = ModelloFinto([richiesta_calendario("d2", nome, args), AIMessage("Non si può.")])
+    nuova = esegui_turno(costruisci_grafo(finto, strumenti_del_calendario()), [], "?")
+    assert nuova[2].tool_call_id == "d2" and nuova[2].status == "error"
     assert nuova[2].content.startswith("Errore: ") and atteso in nuova[2].content

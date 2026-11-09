@@ -28,7 +28,13 @@ PROMPT_DI_SISTEMA = (
     "dillo senza inventare un risultato. "
     "Per ogni conversione tra unità di lunghezza, peso o temperatura chiama lo strumento converti "
     "invece di calcolare da te o con calcola, e usa il risultato così com'è; "
-    "se lo strumento restituisce un errore, di' che la conversione non si può fare e perché."
+    "se lo strumento restituisce un errore, di' che la conversione non si può fare e perché. "
+    "Per i giorni mancanti o trascorsi fino a una data o tra due date chiama giorni_tra, "
+    "per la data tra N giorni o di N giorni fa chiama sposta_data, "
+    "per il giorno della settimana di una data chiama giorno_settimana "
+    "e per la data di Pasqua chiama pasqua, passando le date come AAAA-MM-GG "
+    "oppure MM-GG se l'anno non è indicato; non calcolare da te, usa il risultato così com'è e, "
+    "se lo strumento restituisce un errore, di' che non si può fare e perché."
 )
 
 
