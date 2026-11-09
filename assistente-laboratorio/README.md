@@ -8,13 +8,14 @@ strumento orologio `ora_corrente`, i quattro strumenti del calendario `giorni_tr
 `calcola` della calcolatrice, offerto da un server MCP (vedi «Calcolatrice»), e gli strumenti delle note
 `salva_nota`, `elenca_note` e `cancella_nota`, offerti da un'API FastAPI (vedi «Note»), e gli strumenti del catalogo
 della strumentazione `cerca_apparecchi`, `dettaglio_apparecchio` ed `elenca_apparecchi`, offerti da un secondo server
-MCP (vedi «Catalogo della strumentazione»); il programma li esegue davvero.
+MCP (vedi «Catalogo della strumentazione»); il programma li esegue davvero. Prima dell'agente un router controlla
+che la domanda sia scientifica o sul laboratorio e rifiuta le altre (vedi «Router dell'ambito»).
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
 in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
 mancante sono del 02/11/2026; riprovati lo stesso giorno, con lo stesso esito, anche i messaggi d'errore della
-Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze, delle note e del catalogo del 09/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
+Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze, delle note, del catalogo e del router del 09/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -57,6 +58,7 @@ Se `.env` esiste già il comando lo sovrascrive: in quel caso modificare il file
 | `APP_TIMEZONE` | `Europe/Rome` | Fuso orario IANA per lo strumento orologio |
 | `LOG_LEVEL` | `INFO` | Facoltativa (default `INFO`), maiuscole o minuscole |
 | `NOTE_API_URL` | `http://localhost:8000` | Facoltativa (default `http://localhost:8000`): indirizzo del servizio delle note |
+| `AMBITO_FILE` | `ambito.txt` | Facoltativa (default `ambito.txt`): file con l'ambito dell'agente, usato dal router |
 
 Le prime tre sono obbligatorie: se mancano o sono vuote, l'errore le elenca e rimanda a `.env.example`.
 
@@ -105,7 +107,7 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 .\.venv\Scripts\python.exe -m pytest -m reale -v
 ```
 
-Sono dodici prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
+Sono quattordici prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
 precedente, due domande sull'ora nella stessa sessione (almeno una richiesta di `ora_corrente` per turno: il modello può
 chiamarla più volte nello stesso turno), l'ora
 di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`) e un calcolo («Quanto fa 12,5 per 8
@@ -118,8 +120,10 @@ la risposta contenere `28 marzo`), le note («Segnati che il microscopio 2 va ca
 `salva_nota` riuscito e, in una conversazione nuova, «Che note ho?» un `elenca_note` con la nota e la parola
 `microscopio` nella risposta; il test avvia da sé il servizio su un DB temporaneo) e il catalogo («Dov'è la
 centrifuga?» → `cerca_apparecchi` e la stanza `A03` nella risposta; «Quali apparecchi sono in manutenzione?» →
-`elenca_apparecchi` con `MIC-02` e `PHM-01`, nominati per codice o per nome nella risposta).
-Con un modello locale possono richiedere diversi minuti (il 09/11/2026, con `google/gemma-4-e4b`, 825 s; ogni prova
+`elenca_apparecchi` con `MIC-02` e `PHM-01`, nominati per codice o per nome nella risposta) e il router («Scrivimi
+una poesia sul mare.» → rifiuto, senza nessuna chiamata dell'agente nei log; «Cos'è il pH?» → in ambito, risposta
+dell'agente). Tutte passano dal router, che quindi non deve rifiutare le domande delle altre prove.
+Con un modello locale possono richiedere diversi minuti (il 09/11/2026, con `google/gemma-4-e4b`, 1247 s; ogni prova
 fa più chiamate al modello e la prima carica il modello). Se il modello non chiama lo strumento la prova fallisce:
 il fallimento va riportato, non aggirato.
 
@@ -227,6 +231,41 @@ Get-Content chat.txt
 Senza quella riga le lettere accentate di ingresso arrivano come `?` e quelle in uscita compaiono alterate
 (`├¿` al posto di `è`): è la codifica di PowerShell, non del programma.
 
+## Router dell'ambito
+
+Prima dell'agente un secondo nodo LLM, il **router**, decide se la domanda rientra nell'ambito dell'assistente
+(scienze, laboratorio, ciò che gli strumenti sanno fare, saluti e conversazione con l'utente):
+
+```text
+START → nodo_router ─conversazione→ nodo_llm ⇄ nodo_strumenti → END
+                    └─fuori ambito→ nodo_rifiuto → END
+```
+
+- L'ambito è il testo di `ambito.txt` (percorso modificabile con `AMBITO_FILE`): è il prompt del router e si cambia
+  senza toccare il codice, con effetto dal riavvio.
+- Il router usa lo stesso modello, senza strumenti, e risponde in forma strutturata (`categoria` e `motivo`); vede
+  le ultime domande e risposte testuali, così capisce le domande di seguito. La sua decisione non entra nella
+  cronologia.
+- Fuori ambito: `nodo_rifiuto` risponde «Posso aiutarti solo con domande scientifiche o sul laboratorio: <motivo>.»
+  e l'agente non viene chiamato. Il rifiuto resta nella cronologia, come una risposta normale.
+- Il router ha un client del modello suo, **senza ragionamento** (`reasoning_effort="none"`) e con al massimo 80
+  token: con il ragionamento una decisione richiedeva circa 50 s, senza circa 7–12 s (prove del 09/11/2026). Ogni
+  domanda costa quindi qualche secondo in più.
+- Se il router non decide (risposta illeggibile, errore, tetto dei token raggiunto) la domanda **passa all'agente**,
+  con un `[WARNING]` nel log: meglio una risposta in più che un rifiuto sbagliato.
+
+Prova reale da pipe del 09/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`; uguale in Docker):
+
+```text
+[INFO] router: fuori ambito (Argomento sportivo non relativo al laboratorio.) in 12.0 s
+[INFO] nodo_rifiuto: domanda fuori ambito
+Tu> Assistente> Posso aiutarti solo con domande scientifiche o sul laboratorio: Argomento sportivo non relativo al laboratorio.
+```
+
+Nella stessa prova, per «Cos'è il pH?» il router ha esaurito il tetto dei token (con gemma succede con questa
+domanda anche senza ragionamento): `[WARNING] router: errore (...)`, poi `router: conversazione (errore del router)`
+e la risposta dell'agente, come previsto.
+
 ## Strumento orologio
 
 Per le domande su ora, data o giorno attuali il modello chiede lo strumento `ora_corrente` e il programma lo
@@ -278,8 +317,9 @@ Tu> Assistente> A New York sono le 05:47 di mercoledì 28 ottobre 2026 (ora EDT)
 Tu> Alla prossima!
 ```
 
-Il grafo ammette al massimo 10 passaggi per turno: se il modello continua a chiedere strumenti la chat stampa
-`Errore: limite di 10 passaggi raggiunto. Turno annullato.`, scarta il turno e prosegue.
+Il grafo ammette al massimo 12 passaggi per turno (10 per l'agente e gli strumenti, più router e rifiuto): se il
+modello continua a chiedere strumenti la chat stampa `Errore: limite di 12 passaggi raggiunto. Turno annullato.`,
+scarta il turno e prosegue.
 
 ## Giorni e scadenze (funzione nel grafo)
 
@@ -659,6 +699,10 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
 
 ## Diagnosi
 
+- **Una domanda legittima viene rifiutata** (`router: fuori ambito (...)` nel log): allargare la descrizione in
+  `ambito.txt` (vale dal riavvio dell'assistente). Se manca il file, l'avvio termina con `Errore: File dell'ambito
+  ... non trovato. Controllare AMBITO_FILE ...` e codice 1. Un `[WARNING] router: errore (...)` o `router: decisione
+  illeggibile` indica che il router non ha deciso: la domanda passa comunque all'agente.
 - **Il catalogo non parte** (`Errore: server MCP catalogo non avviato (...)` all'avvio, codice 1): di solito
   `catalogo_mcp/apparecchi.json` non è valido dopo una modifica (JSON malformato, campo mancante, stato non ammesso,
   data non `AAAA-MM-GG`). Il messaggio del server si legge con `.\.venv\Scripts\python.exe -m catalogo_mcp`, che con
