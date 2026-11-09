@@ -3,14 +3,15 @@
 Applicazione da terminale in Python costruita attorno a un grafo LangGraph esplicito.
 Il grafo inoltra la conversazione al modello locale servito da LM Studio e conserva la
 cronologia per la durata della sessione (nessuna persistenza). Il modello può chiedere lo
-strumento orologio `ora_corrente`, il convertitore di unità `converti` (vedi «Convertitore») e lo strumento
+strumento orologio `ora_corrente`, i quattro strumenti del calendario `giorni_tra`, `sposta_data`,
+`giorno_settimana` e `pasqua` (vedi «Giorni e scadenze»), il convertitore di unità `converti` (vedi «Convertitore») e lo strumento
 `calcola` della calcolatrice, offerto da un server MCP (vedi «Calcolatrice»); il programma li esegue davvero.
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
 in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
 mancante sono del 02/11/2026; riprovati lo stesso giorno, con lo stesso esito, anche i messaggi d'errore della
-Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
+Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze del 09/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -100,16 +101,23 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 .\.venv\Scripts\python.exe -m pytest -m reale -v
 ```
 
-Sono sette prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
+Sono nove prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
 precedente, due domande sull'ora nella stessa sessione (almeno una richiesta di `ora_corrente` per turno: il modello può
 chiamarla più volte nello stesso turno), l'ora
 di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`) e un calcolo («Quanto fa 12,5 per 8
 meno 3?»: il risultato `97` deve venire dallo strumento `calcola` e comparire nella risposta) e due conversioni
 («Quanti metri sono 4 cm?» e «Quanti gradi Fahrenheit sono 20 °C?»: i risultati `4 cm = 0,04 m` e `20 °C = 68 °F`
-devono venire dallo strumento `converti`, e `0,04` e `68` comparire nella risposta).
-Con un modello locale possono richiedere diversi minuti (il 03/11/2026, con `google/gemma-4-e4b`, 489 s; ogni prova
+devono venire dallo strumento `converti`, e `0,04` e `68` comparire nella risposta), i giorni che mancano al
+25 dicembre (il risultato di `giorni_tra` deve coincidere con il numero calcolato sulla data reale di oggi, che deve
+comparire nella risposta) e la Pasqua del 2027 (`pasqua` deve restituire `Pasqua 2027: domenica 28 marzo 2027` e
+la risposta contenere `28 marzo`).
+Con un modello locale possono richiedere diversi minuti (il 09/11/2026, con `google/gemma-4-e4b`, 399 s; ogni prova
 fa più chiamate al modello e la prima carica il modello). Se il modello non chiama lo strumento la prova fallisce:
 il fallimento va riportato, non aggirato.
+
+I test di giorni e scadenze (senza modello, con oggi fissato al 03/11/2026) sono in `tests/test_calendario.py`
+(lettura delle date, conteggi, anni bisestili, Pasqua, errori, oggi nel fuso configurato vicino alla mezzanotte) e
+in `tests/test_grafo.py` (il giro nel grafo con un modello finto, anche con errore).
 
 I test del convertitore (senza modello) sono in `tests/test_convertitore.py` (conversioni, formato, nomi delle
 unità, errori) e in `tests/test_grafo.py` (il giro nel grafo con un modello finto, anche con errore).
@@ -256,6 +264,49 @@ Tu> Alla prossima!
 
 Il grafo ammette al massimo 10 passaggi per turno: se il modello continua a chiedere strumenti la chat stampa
 `Errore: limite di 10 passaggi raggiunto. Turno annullato.`, scarta il turno e prosegue.
+
+## Giorni e scadenze (funzione nel grafo)
+
+Per le domande sul calendario il modello ha quattro strumenti; il conto lo fa il programma, non il modello:
+
+- `giorni_tra(data, partenza)`: giorni che mancano a `data` o che sono passati, da oggi o da `partenza`
+  (`da lunedì 9 novembre 2026 a venerdì 25 dicembre 2026: mancano 46 giorni`; «è oggi» se la data è oggi);
+- `sposta_data(giorni, data)`: la data tra N giorni (o N giorni fa, con N negativo), da oggi o da `data`
+  (`tra 30 giorni: giovedì 3 dicembre 2026`, con oggi martedì 3 novembre 2026);
+- `giorno_settimana(data)`: la data per esteso con il giorno della settimana (`martedì 14 luglio 1789`);
+- `pasqua(anno)`: la Pasqua cattolica di un anno, dal 1583 (`Pasqua 2027: domenica 28 marzo 2027`); senza anno,
+  quella dell'anno corrente.
+
+Le date si passano come `AAAA-MM-GG` (`2026-12-25`) oppure `MM-GG` (`12-25`) quando l'anno non c'è: in questo caso
+vale la **prossima** occorrenza, oggi compreso (il 29 febbraio senza anno è quello del prossimo anno bisestile).
+«Oggi» è la data dell'orologio dell'assistente nel fuso `APP_TIMEZONE`, non quella UTC.
+
+Quando la richiesta non ha senso lo strumento restituisce un errore in italiano, che il modello deve spiegare senza
+inventare una data: data inesistente (`data non valida «2026-02-30»`), formato non riconosciuto (con i due formati
+ammessi), anno fuori dall'intervallo 1–9999, Pasqua prima del 1583, argomenti mancanti o del tipo sbagliato (per
+esempio `giorni` con i decimali).
+
+Sono **funzioni Python del grafo** (`assistente/calendario.py`), come l'orologio e il convertitore: calcoli puri
+sul calendario più la data di oggi, che il programma ha già; nessun dato esterno né stato, quindi un server
+aggiungerebbe solo un processo e un punto di guasto. Prova reale da pipe del 09/11/2026 (`LOG_LEVEL=INFO`,
+`google/gemma-4-e4b`; uguale in Docker):
+
+```text
+[INFO] instradamento: richiesta strumento giorni_tra {"data": "12-25"}
+[INFO] nodo_strumenti: giorni_tra -> da lunedì 9 novembre 2026 a venerdì 25 dicembre 2026: mancano 46 giorni
+[INFO] nodo_llm: chiamata al modello (4 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 15.5 s
+[INFO] instradamento: nessuno strumento -> fine
+Tu> Assistente> Mancano 46 giorni al 25 dicembre (venerdì 25 dicembre 2026).
+[INFO] nodo_llm: chiamata al modello (6 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 10.6 s
+[INFO] instradamento: richiesta strumento pasqua {"anno": 2027}
+[INFO] nodo_strumenti: pasqua -> Pasqua 2027: domenica 28 marzo 2027
+[INFO] nodo_llm: chiamata al modello (8 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 15.7 s
+[INFO] instradamento: nessuno strumento -> fine
+Tu> Assistente> Pasqua nel 2027 cade di domenica 28 marzo 2027.
+```
 
 ## Convertitore (funzione nel grafo)
 
@@ -557,6 +608,10 @@ converti {...}` mostra la richiesta del modello e `[INFO] nodo_strumenti: conver
 errore controllato (per esempio unità non supportata) compare come `[WARNING] nodo_strumenti: errore dello
 strumento converti: <motivo>`. Se manca la riga `richiesta strumento converti`, il modello ha risposto senza lo
 strumento e il numero non viene dal programma.
+
+Per giorni e scadenze (vedi «Giorni e scadenze») vale lo stesso con `giorni_tra`, `sposta_data`,
+`giorno_settimana` e `pasqua`: senza la riga `richiesta strumento <nome>` la data o il numero non vengono dal
+programma. Se il conteggio sembra spostato di un giorno, controllare `APP_TIMEZONE`: «oggi» è calcolato in quel fuso.
 
 Con Docker Compose (sintomo, primo controllo):
 

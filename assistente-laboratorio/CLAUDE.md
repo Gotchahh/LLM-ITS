@@ -29,6 +29,8 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - `assistente/`: pacchetto avviato con `python -m assistente`.
   - `config.py`: variabili d'ambiente, validazione, configurazione dei log.
   - `strumenti.py`: strumento `ora_corrente` (fuso facoltativo, istante iniettabile).
+  - `calendario.py`: strumenti `giorni_tra`, `sposta_data`, `giorno_settimana`, `pasqua` (oggi dal fuso configurato,
+    istante iniettabile).
   - `convertitore.py`: strumento `converti` (lunghezze, pesi, temperature; logica pura e fabbrica dello strumento).
   - `modello.py`: `ChatOpenAI` verso LM Studio e controllo dell'elenco modelli all'avvio.
   - `grafo.py`: stato, nodi e instradamento; `costruisci_grafo(modello, strumenti)`.

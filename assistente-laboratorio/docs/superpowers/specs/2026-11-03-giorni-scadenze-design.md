@@ -100,10 +100,10 @@ separati dalle prove reali; le prove da pipe senza `PYTHONIOENCODING`, in una Po
 I nomi dei parametri sono indicativi; i testi esatti dei risultati sono lasciati a chi costruisce, purché
 contengano le informazioni indicate.
 
-| Strumento | Parametri | Risultato (esempio con oggi = lunedì 3 novembre 2026) |
+| Strumento | Parametri | Risultato (esempio con oggi = martedì 3 novembre 2026) |
 |---|---|---|
-| `giorni_tra` | `data` (arrivo), `partenza` facoltativa (oggi se manca) | `12-25` → «da lunedì 3 novembre 2026 a venerdì 25 dicembre 2026: mancano 52 giorni»; data passata → «sono passati N giorni»; stessa data → «è oggi» (o «0 giorni» con partenza esplicita) |
-| `sposta_data` | `giorni` (intero, negativo per il passato), `data` di partenza facoltativa (oggi se manca) | `30` → «tra 30 giorni: mercoledì 3 dicembre 2026»; `-10` → «10 giorni prima: venerdì 24 ottobre 2026» |
+| `giorni_tra` | `data` (arrivo), `partenza` facoltativa (oggi se manca) | `12-25` → «da martedì 3 novembre 2026 a venerdì 25 dicembre 2026: mancano 52 giorni»; data passata → «sono passati N giorni»; stessa data → «è oggi» (o «0 giorni» con partenza esplicita) |
+| `sposta_data` | `giorni` (intero, negativo per il passato), `data` di partenza facoltativa (oggi se manca) | `30` → «tra 30 giorni: giovedì 3 dicembre 2026»; `-10` → «10 giorni fa: sabato 24 ottobre 2026» |
 | `giorno_settimana` | `data` | `1789-07-14` → «martedì 14 luglio 1789» |
 | `pasqua` | `anno` facoltativo (anno corrente se manca) | `2027` → «Pasqua 2027: domenica 28 marzo 2027» |
 
