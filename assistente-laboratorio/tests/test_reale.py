@@ -1,5 +1,6 @@
 """Prove con LM Studio attivo: `python -m pytest -m reale -v` (escluse di default)."""
 
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -8,16 +9,18 @@ import pytest
 
 from assistente.calendario import crea_strumenti_calendario, leggi_data
 from assistente.client_mcp import carica_strumenti_mcp
-from assistente.config import carica_configurazione, leggi_file_env
+from assistente.config import carica_configurazione, leggi_ambito, leggi_file_env
 from assistente.convertitore import crea_strumento_convertitore
 from assistente.grafo import costruisci_grafo, esegui_turno
-from assistente.modello import crea_modello, leggi_modelli_disponibili, verifica_modello
+from assistente.modello import crea_modello, crea_modello_router, leggi_modelli_disponibili, verifica_modello
+from assistente.router import INIZIO_RIFIUTO
 from assistente.note import crea_strumenti_note
 from assistente.strumenti import crea_strumento_orologio
 
 pytestmark = pytest.mark.reale
 
-FILE_ENV = Path(__file__).resolve().parent.parent / ".env"
+RADICE = Path(__file__).resolve().parent.parent
+FILE_ENV = RADICE / ".env"
 
 
 @pytest.fixture(scope="module")
@@ -37,7 +40,8 @@ def grafo(config, servizio_note):
         *crea_strumenti_note(servizio_note, config.fuso),
         *carica_strumenti_mcp(),
     ]
-    return costruisci_grafo(crea_modello(config), strumenti)
+    ambito = leggi_ambito(RADICE / "ambito.txt")
+    return costruisci_grafo(crea_modello(config), strumenti, ambito, crea_modello_router(config))
 
 
 def test_reale_risposta_ordinaria(grafo):
@@ -133,3 +137,18 @@ def test_reale_in_manutenzione(grafo):
     risposta = cronologia[-1].text
     assert "MIC-02" in risposta or "Microscopio ottico 2" in risposta
     assert "PHM-01" in risposta or "pHmetro" in risposta
+
+
+def test_reale_fuori_ambito(grafo, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    cronologia = esegui_turno(grafo, [], "Scrivimi una poesia sul mare.")
+    assert [m.type for m in cronologia] == ["human", "ai"] and cronologia[-1].text.startswith(INIZIO_RIFIUTO)
+    assert any(m.startswith("router: fuori ambito") for m in caplog.messages)
+    assert not any(m.startswith("nodo_llm:") for m in caplog.messages)
+
+
+def test_reale_domanda_scientifica(grafo, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    cronologia = esegui_turno(grafo, [], "Cos'è il pH?")
+    assert not cronologia[-1].text.startswith(INIZIO_RIFIUTO) and cronologia[-1].text.strip()
+    assert any(m.startswith("nodo_llm:") for m in caplog.messages)
