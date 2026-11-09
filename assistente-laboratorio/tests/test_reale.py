@@ -117,3 +117,19 @@ def test_reale_note(grafo):
     risultati = [m.content for m in elenco if m.type == "tool" and m.name == "elenca_note"]
     assert any("microscopio 2" in r for r in risultati)
     assert "microscopio" in elenco[-1].text.lower()
+
+
+def test_reale_dove_la_centrifuga(grafo):
+    cronologia = esegui_turno(grafo, [], "Dov'è la centrifuga?")
+    risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "cerca_apparecchi"]
+    assert any("A03" in r for r in risultati)
+    assert "A03" in cronologia[-1].text
+
+
+def test_reale_in_manutenzione(grafo):
+    cronologia = esegui_turno(grafo, [], "Quali apparecchi sono in manutenzione?")
+    risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "elenca_apparecchi"]
+    assert any("MIC-02" in r and "PHM-01" in r for r in risultati)
+    risposta = cronologia[-1].text
+    assert "MIC-02" in risposta or "Microscopio ottico 2" in risposta
+    assert "PHM-01" in risposta or "pHmetro" in risposta
