@@ -35,10 +35,14 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   - `modello.py`: `ChatOpenAI` verso LM Studio e controllo dell'elenco modelli all'avvio.
   - `grafo.py`: stato, nodi e instradamento; `costruisci_grafo(modello, strumenti)`.
   - `cli.py`, `__main__.py`: ciclo di chat, cronologia, comandi `/esci` e `/log`, scritta «Ragionando...».
+  - `note.py`: strumenti `salva_nota`, `elenca_note`, `cancella_nota`, wrapper `urllib` verso il servizio delle
+    note (`NOTE_API_URL`).
   - `client_mcp.py`: discovery del server MCP della calcolatrice e strumenti MCP resi sincroni (unico modulo con
     `asyncio` e `langchain_mcp_adapters`).
 - `calcolatrice_mcp/`: server MCP della calcolatrice (`calcolo.py` logica pura, `server.py` FastMCP su stdio),
   avviato dall'assistente con `python -m calcolatrice_mcp`; non importa nulla da `assistente/`.
+- `note_api/`: servizio FastAPI delle note (`archivio.py` SQLite, `server.py` endpoint), avviato con
+  `python -m note_api` (`NOTE_DB`, `NOTE_HOST`, `NOTE_PORT`); non importa nulla da `assistente/`. `dati/` fuori da Git.
 - `tests/`: test automatici senza modello; `test_reale.py` contiene le prove con LM Studio (marcatore `reale`).
 - `docs/superpowers/`: specifica e piano.
 - `Dockerfile`, `compose.yaml`, `.dockerignore`: avvio con Docker Compose.
@@ -52,7 +56,7 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   librerie MCP resta confinata nel modulo client MCP.
 - LM Studio sull'host, raggiunto tramite la sua API compatibile con OpenAI.
 - Indirizzo del server e identificativo del modello solo da variabili d'ambiente
-  (`LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`; inoltre `APP_TIMEZONE` e `LOG_LEVEL`).
+  (`LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`; inoltre `APP_TIMEZONE`, `LOG_LEVEL` e `NOTE_API_URL`).
   L'identificativo è quello restituito dal server (`GET /v1/models`), mai inventato.
 - Un file di configurazione di esempio senza credenziali; il file reale (`.env`) resta fuori da Git.
 - Docker Compose per l'applicazione; LM Studio non va containerizzato.
@@ -65,7 +69,8 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 
 ## Comandi
 - Installazione: `py -3.14 -m venv .venv`, poi `.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt`.
-- Avvio: `.\.venv\Scripts\python.exe -m assistente`.
+- Avvio: `.\.venv\Scripts\python.exe -m assistente` (per le note, prima `.\.venv\Scripts\python.exe -m note_api` in un
+  secondo terminale).
 - Test automatici (nessun modello; i `reale` sono esclusi di default): `.\.venv\Scripts\python.exe -m pytest`.
 - Test reali (LM Studio attivo, `.env` compilato; richiedono diversi minuti):
   `.\.venv\Scripts\python.exe -m pytest -m reale -v`.
