@@ -17,11 +17,16 @@ SCHEMA_REVISORE = {
     "title": "valutazione_revisore",
     "description": "Valutazione della risposta proposta rispetto alla domanda dell'utente",
     "type": "object",
+    # Il motivo viene prima del verdetto: il modello scrive i campi in quest'ordine e, con il verdetto per primo,
+    # decideva «coerente» prima di accorgersi che mancava una parte (prova reale del 09/11/2026).
     "properties": {
+        "motivo": {
+            "type": "string",
+            "description": "in italiano, al massimo 12 parole: che cosa manca o è fuori tema, oppure «risposta completa»",
+        },
         "coerente": {"type": "boolean"},
-        "motivo": {"type": "string", "description": "al massimo 12 parole, in italiano"},
     },
-    "required": ["coerente", "motivo"],
+    "required": ["motivo", "coerente"],
 }
 
 

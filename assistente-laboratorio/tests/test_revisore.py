@@ -15,7 +15,8 @@ from assistente.revisore import (
 def test_schema():
     assert SCHEMA_REVISORE["title"] == "valutazione_revisore"
     assert SCHEMA_REVISORE["properties"]["coerente"]["type"] == "boolean"
-    assert SCHEMA_REVISORE["required"] == ["coerente", "motivo"]
+    assert SCHEMA_REVISORE["required"] == ["motivo", "coerente"]
+    assert list(SCHEMA_REVISORE["properties"]) == ["motivo", "coerente"]  # il verdetto dopo il motivo
 
 
 def test_indicazione_marcata():

@@ -10,4 +10,4 @@ In tutti gli altri casi rispondi coerente=true. In particolare non giudicare lo 
 dei fatti (date, numeri e dati vengono dagli strumenti); sono coerenti anche un rifiuto motivato e la spiegazione
 che uno strumento ha dato un errore. In caso di dubbio rispondi coerente=true.
 
-Il motivo deve avere al massimo 12 parole e, se coerente=false, dire che cosa manca o che cosa è fuori tema.
+Il motivo deve avere al massimo 12 parole: che cosa manca o che cosa è fuori tema, oppure «risposta completa».
