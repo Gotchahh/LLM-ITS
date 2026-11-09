@@ -5,17 +5,31 @@ import logging
 import time
 from typing import Annotated, NotRequired, TypedDict
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 
+from assistente.revisore import (
+    SCHEMA_REVISORE,
+    indicazione,
+    leggi_valutazione,
+    messaggi_per_il_revisore,
+    ultima_domanda,
+)
 from assistente.router import SCHEMA_ROUTER, leggi_decisione, messaggi_per_il_router, testo_rifiuto
 
 logger = logging.getLogger(__name__)
 
-LIMITE_PASSAGGI = 12  # 10 per l'agente e gli strumenti, più router e rifiuto
+LIMITE_PASSAGGI = 20  # 10 per l'agente e gli strumenti, più router, revisioni e pulizia
 
 PROMPT_DI_SISTEMA = (
     "Sei l'assistente del laboratorio e rispondi sempre in italiano. "
@@ -53,11 +67,20 @@ class RispostaNonValida(Exception):
 
 
 class Stato(TypedDict):
-    """Stato del grafo: la cronologia dei messaggi, in aggiunta a ogni passaggio, e la decisione del router."""
+    """Stato del grafo: la cronologia dei messaggi, in aggiunta a ogni passaggio, la decisione del router e lo
+    stato delle revisioni del turno (ripartono da zero a ogni turno, perché ogni turno parte dai soli messaggi)."""
 
     messages: Annotated[list[AnyMessage], add_messages]
     categoria: NotRequired[str]
     motivo_router: NotRequired[str]
+    revisioni: NotRequired[int]
+    scartati: NotRequired[list[str]]
+    approvata: NotRequired[bool]
+
+
+def instrada_revisore(stato: Stato) -> str:
+    """Arco condizionale dopo `nodo_revisore`: "nodo_pulizia" se la risposta resta, "nodo_llm" se va riscritta."""
+    return "nodo_pulizia" if stato.get("approvata", True) else "nodo_llm"
 
 
 def instrada_router(stato: Stato) -> str:
@@ -81,19 +104,31 @@ def instrada(stato: Stato) -> str:
 
 
 def costruisci_grafo(
-    modello, strumenti: list[BaseTool], ambito: str | None = None, modello_router=None
+    modello,
+    strumenti: list[BaseTool],
+    ambito: str | None = None,
+    modello_router=None,
+    revisore: str | None = None,
+    revisioni_max: int = 2,
 ) -> CompiledStateGraph:
     """Costruisce il grafo attorno a `modello` e agli `strumenti`.
 
     START -> nodo_llm -> (instrada) -> nodo_strumenti | END, e nodo_strumenti -> nodo_llm.
     Con `ambito` il grafo parte da nodo_router, che manda le domande fuori ambito a nodo_rifiuto -> END;
     il router usa `modello_router` (predefinito: `modello`) senza strumenti e con l'ambito come prompt.
+    Con `revisore` (istruzioni) la risposta senza strumenti va a nodo_revisore: se non è coerente, e le revisioni
+    sono meno di `revisioni_max`, torna a nodo_llm con un'indicazione; altrimenti nodo_pulizia toglie bozze e
+    indicazioni e il turno finisce. Il revisore usa lo stesso modello del router.
     Gli strumenti vengono associati al modello una volta sola, e solo se l'elenco non è vuoto:
     un elenco `tools` vuoto può essere rifiutato dall'API.
     """
     if ambito is not None:
         router = (modello_router or modello).with_structured_output(
             SCHEMA_ROUTER, method="json_schema", include_raw=True
+        )
+    if revisore is not None:
+        revisore_llm = (modello_router or modello).with_structured_output(
+            SCHEMA_REVISORE, method="json_schema", include_raw=True
         )
     if strumenti:
         modello = modello.bind_tools(strumenti)
@@ -167,6 +202,50 @@ def costruisci_grafo(
         logger.info("nodo_rifiuto: domanda fuori ambito")
         return {"messages": [AIMessage(testo_rifiuto(stato["motivo_router"]))]}
 
+    def nodo_revisore(stato: Stato) -> dict:
+        """Valuta l'ultima risposta; qualsiasi errore del revisore la approva."""
+        domanda, bozza = ultima_domanda(stato["messages"]), stato["messages"][-1]
+        revisioni = stato.get("revisioni", 0)
+        inizio = time.perf_counter()
+        try:
+            risultato = revisore_llm.invoke(messaggi_per_il_revisore(revisore, domanda, bozza.text))
+            coerente, motivo = leggi_valutazione(risultato)
+        except Exception as errore:
+            logger.warning("revisore: errore (%s), la risposta è approvata", type(errore).__name__)
+            coerente, motivo = True, "errore del revisore"
+        durata = time.perf_counter() - inizio
+        if coerente:
+            logger.info("revisore: coerente (%s) in %.1f s", motivo, durata)
+            return {"approvata": True}
+        if revisioni >= revisioni_max:
+            logger.info("revisore: non coerente (%s) in %.1f s", motivo, durata)
+            logger.warning("revisore: limite di revisioni raggiunto, si restituisce l'ultima risposta")
+            return {"approvata": True}
+        revisioni += 1
+        logger.info(
+            "revisore: non coerente (%s), revisione %d di %d in %.1f s", motivo, revisioni, revisioni_max, durata
+        )
+        nuova = indicazione(motivo, domanda)
+        return {
+            "messages": [nuova],
+            "revisioni": revisioni,
+            "scartati": [*stato.get("scartati", []), bozza.id, nuova.id],
+            "approvata": False,
+        }
+
+    def nodo_pulizia(stato: Stato) -> dict:
+        """Toglie dalla cronologia le bozze rifiutate e le indicazioni del revisore."""
+        scartati = stato.get("scartati", [])
+        if not scartati:
+            return {}
+        logger.info("nodo_pulizia: rimossi %d messaggi di revisione", len(scartati))
+        return {"messages": [RemoveMessage(id=identificativo) for identificativo in scartati]}
+
+    def instrada_agente(stato: Stato) -> str:
+        """Dopo nodo_llm: strumenti se richiesti; altrimenti revisore (se configurato) o fine."""
+        destinazione = instrada(stato)
+        return "nodo_revisore" if destinazione == END and revisore is not None else destinazione
+
     costruttore = StateGraph(Stato)
     costruttore.add_node("nodo_llm", nodo_llm)
     costruttore.add_node("nodo_strumenti", nodo_strumenti)
@@ -178,7 +257,14 @@ def costruisci_grafo(
         costruttore.add_edge(START, "nodo_router")
         costruttore.add_conditional_edges("nodo_router", instrada_router, ["nodo_llm", "nodo_rifiuto"])
         costruttore.add_edge("nodo_rifiuto", END)
-    costruttore.add_conditional_edges("nodo_llm", instrada, ["nodo_strumenti", END])
+    if revisore is None:
+        costruttore.add_conditional_edges("nodo_llm", instrada, ["nodo_strumenti", END])
+    else:
+        costruttore.add_node("nodo_revisore", nodo_revisore)
+        costruttore.add_node("nodo_pulizia", nodo_pulizia)
+        costruttore.add_conditional_edges("nodo_llm", instrada_agente, ["nodo_strumenti", "nodo_revisore"])
+        costruttore.add_conditional_edges("nodo_revisore", instrada_revisore, ["nodo_llm", "nodo_pulizia"])
+        costruttore.add_edge("nodo_pulizia", END)
     costruttore.add_edge("nodo_strumenti", "nodo_llm")
     return costruttore.compile()
 
