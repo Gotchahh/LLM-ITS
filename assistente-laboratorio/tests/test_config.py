@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import pytest
 from conftest import VALIDO
@@ -8,6 +9,7 @@ from assistente.config import (
     ModalitaLog,
     carica_configurazione,
     configura_log,
+    leggi_ambito,
     leggi_file_env,
 )
 
@@ -141,3 +143,32 @@ def test_indirizzo_delle_note():
     assert carica_configurazione({**VALIDO, "NOTE_API_URL": "http://note:8000/"}).note_url == "http://note:8000"
     with pytest.raises(ErroreConfigurazione, match="NOTE_API_URL"):
         carica_configurazione({**VALIDO, "NOTE_API_URL": "note:8000"})
+
+
+def test_file_dell_ambito():
+    assert carica_configurazione(VALIDO).ambito_file == Path("ambito.txt")
+    assert carica_configurazione({**VALIDO, "AMBITO_FILE": " "}).ambito_file == Path("ambito.txt")
+    assert carica_configurazione({**VALIDO, "AMBITO_FILE": " altro.txt "}).ambito_file == Path("altro.txt")
+
+
+def test_leggi_ambito(tmp_path):
+    valido = tmp_path / "ambito.txt"
+    valido.write_text("  testo \n", encoding="utf-8")
+    assert leggi_ambito(valido) == "testo"
+
+
+@pytest.mark.parametrize("contenuto", [None, "   \n", "utf16"])
+def test_leggi_ambito_non_valido(tmp_path, contenuto):
+    percorso = tmp_path / "ambito.txt"
+    if contenuto == "utf16":
+        percorso.write_text("ambito", encoding="utf-16")
+    elif contenuto is not None:
+        percorso.write_text(contenuto, encoding="utf-8")
+    with pytest.raises(ErroreConfigurazione) as errore:
+        leggi_ambito(percorso)
+    assert "AMBITO_FILE" in str(errore.value) and "ambito.txt" in str(errore.value)
+
+
+def test_ambito_del_progetto():
+    testo = leggi_ambito(Path(__file__).resolve().parent.parent / "ambito.txt")
+    assert "laboratorio" in testo and "fuori_ambito" in testo and "conversazione" in testo

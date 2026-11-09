@@ -16,6 +16,8 @@ VARIABILE_FUSO = "APP_TIMEZONE"
 VARIABILE_LOG = "LOG_LEVEL"
 VARIABILE_NOTE = "NOTE_API_URL"
 NOTE_URL_PREDEFINITO = "http://localhost:8000"
+VARIABILE_AMBITO = "AMBITO_FILE"
+AMBITO_PREDEFINITO = "ambito.txt"
 
 OBBLIGATORIE = (VARIABILE_URL, VARIABILE_MODELLO, VARIABILE_FUSO)
 LIVELLI_LOG = ("DEBUG", "INFO", "WARNING", "ERROR")
@@ -35,6 +37,7 @@ class Configurazione:
     fuso: ZoneInfo
     livello_log: str
     note_url: str = NOTE_URL_PREDEFINITO
+    ambito_file: Path = Path(AMBITO_PREDEFINITO)
 
 
 def leggi_file_env(percorso: Path) -> dict[str, str]:
@@ -52,6 +55,22 @@ def leggi_file_env(percorso: Path) -> dict[str, str]:
             "Ricrearlo con Copy-Item .env.example .env e modificarlo con un editor che salva in UTF-8."
         ) from None
     return {chiave: valore for chiave, valore in valori.items() if valore is not None}
+
+
+def leggi_ambito(percorso: Path) -> str:
+    """Testo dell'ambito dell'agente (prompt del router); ErroreConfigurazione se manca, è vuoto o non è UTF-8."""
+    suggerimento = f"Controllare {VARIABILE_AMBITO} (predefinito {AMBITO_PREDEFINITO})."
+    try:
+        testo = Path(percorso).read_text(encoding="utf-8-sig").strip()
+    except FileNotFoundError:
+        raise ErroreConfigurazione(f"File dell'ambito {percorso} non trovato. {suggerimento}") from None
+    except UnicodeDecodeError:
+        raise ErroreConfigurazione(f"Il file dell'ambito {percorso} non è in UTF-8. {suggerimento}") from None
+    except OSError as errore:
+        raise ErroreConfigurazione(f"File dell'ambito {percorso} non leggibile: {errore}. {suggerimento}") from None
+    if not testo:
+        raise ErroreConfigurazione(f"Il file dell'ambito {percorso} è vuoto. {suggerimento}")
+    return testo
 
 
 def _indirizzo(nome: str, valore: str, esempio: str) -> str:
@@ -74,7 +93,7 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
 
     Gli spazi ai bordi sono tolti e un valore vuoto equivale a una variabile mancante.
     """
-    valori = {nome: ambiente.get(nome, "").strip() for nome in (*OBBLIGATORIE, VARIABILE_LOG, VARIABILE_NOTE)}
+    valori = {nome: ambiente.get(nome, "").strip() for nome in (*OBBLIGATORIE, VARIABILE_LOG, VARIABILE_NOTE, VARIABILE_AMBITO)}
 
     mancanti = [nome for nome in OBBLIGATORIE if not valori[nome]]
     if mancanti:
@@ -107,6 +126,7 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
         fuso=fuso,
         livello_log=livello_log,
         note_url=note_url,
+        ambito_file=Path(valori[VARIABILE_AMBITO] or AMBITO_PREDEFINITO),
     )
 
 

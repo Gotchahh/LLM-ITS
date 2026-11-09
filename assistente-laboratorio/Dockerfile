@@ -7,6 +7,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY ambito.txt .
 COPY assistente/ assistente/
 COPY calcolatrice_mcp/ calcolatrice_mcp/
 COPY catalogo_mcp/ catalogo_mcp/
