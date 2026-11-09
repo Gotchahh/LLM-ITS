@@ -141,3 +141,9 @@ def test_strumenti():
             per_nome[nome].invoke(argomenti)
         assert parametro in str(errore.value)
         assert "validation" not in str(errore.value).lower()
+
+
+def test_date_facoltative_vuote_valgono_oggi():
+    per_nome = strumenti()
+    assert per_nome["sposta_data"].invoke({"giorni": 30, "data": " "}) == "tra 30 giorni: giovedì 3 dicembre 2026"
+    assert per_nome["giorni_tra"].invoke({"data": "12-25", "partenza": ""}).endswith("mancano 52 giorni")

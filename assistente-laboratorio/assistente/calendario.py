@@ -108,8 +108,14 @@ def data_di_pasqua(anno: int) -> date:
     return date(anno, mese, giorno + 1)
 
 
+def _assente(testo: str | None) -> bool:
+    """Una data facoltativa mancante, nulla o vuota vale oggi (come il fuso di `ora_corrente`)."""
+    return testo is None or not testo.strip()
+
+
 def giorni_tra(data: str, partenza: str | None, oggi: date) -> str:
     """Giorni da `partenza` (oggi se manca) a `data`: «mancano N giorni», «sono passati N giorni», «è oggi»."""
+    partenza = None if _assente(partenza) else partenza
     arrivo = leggi_data(data, oggi)
     inizio = oggi if partenza is None else leggi_data(partenza, oggi)
     differenza = (arrivo - inizio).days
@@ -125,6 +131,7 @@ def giorni_tra(data: str, partenza: str | None, oggi: date) -> str:
 
 def sposta_data(giorni: int, data: str | None, oggi: date) -> str:
     """La data `giorni` giorni dopo (o prima) di `data` (oggi se manca)."""
+    data = None if _assente(data) else data
     inizio = oggi if data is None else leggi_data(data, oggi)
     try:
         arrivo = inizio + timedelta(days=giorni)
