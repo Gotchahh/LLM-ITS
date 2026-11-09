@@ -373,7 +373,7 @@ def test_eccezione_del_router_passa_all_agente(caplog):
     finto = ModelloFinto([AIMessage("Risposta")], decisioni=[RuntimeError("limite di lunghezza")])
     nuova = esegui_turno(costruisci_grafo(finto, [], AMBITO), [], "?")
     assert nuova[-1].text == "Risposta"
-    assert any(r.levelno == logging.WARNING and "router: errore (limite di lunghezza)" in r.getMessage()
+    assert any(r.levelno == logging.WARNING and "router: errore (RuntimeError), la domanda passa" in r.getMessage()
                for r in caplog.records)
 
 

@@ -156,7 +156,7 @@ def costruisci_grafo(
         try:
             categoria, motivo = leggi_decisione(router.invoke(messaggi))
         except Exception as errore:
-            logger.warning("router: errore (%s), la domanda passa all'agente", errore)
+            logger.warning("router: errore (%s), la domanda passa all'agente", type(errore).__name__)
             categoria, motivo = "conversazione", "errore del router"
         descrizione = "fuori ambito" if categoria == "fuori_ambito" else categoria
         logger.info("router: %s (%s) in %.1f s", descrizione, motivo, time.perf_counter() - inizio)
