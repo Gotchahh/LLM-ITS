@@ -9,13 +9,14 @@ strumento orologio `ora_corrente`, i quattro strumenti del calendario `giorni_tr
 `salva_nota`, `elenca_note` e `cancella_nota`, offerti da un'API FastAPI (vedi «Note»), e gli strumenti del catalogo
 della strumentazione `cerca_apparecchi`, `dettaglio_apparecchio` ed `elenca_apparecchi`, offerti da un secondo server
 MCP (vedi «Catalogo della strumentazione»); il programma li esegue davvero. Prima dell'agente un router controlla
-che la domanda sia scientifica o sul laboratorio e rifiuta le altre (vedi «Router dell'ambito»).
+che la domanda sia scientifica o sul laboratorio e rifiuta le altre (vedi «Router dell'ambito»); dopo la risposta
+un revisore controlla che risponda a tutta la domanda e, se no, la fa riscrivere (vedi «Revisore della risposta»).
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
 in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
 mancante sono del 02/11/2026; riprovati lo stesso giorno, con lo stesso esito, anche i messaggi d'errore della
-Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze, delle note, del catalogo e del router del 09/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
+Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze, delle note, del catalogo, del router e del revisore del 09/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -59,6 +60,8 @@ Se `.env` esiste già il comando lo sovrascrive: in quel caso modificare il file
 | `LOG_LEVEL` | `INFO` | Facoltativa (default `INFO`), maiuscole o minuscole |
 | `NOTE_API_URL` | `http://localhost:8000` | Facoltativa (default `http://localhost:8000`): indirizzo del servizio delle note |
 | `AMBITO_FILE` | `ambito.txt` | Facoltativa (default `ambito.txt`): file con l'ambito dell'agente, usato dal router |
+| `REVISORE_FILE` | `revisore.txt` | Facoltativa (default `revisore.txt`): istruzioni del revisore della risposta |
+| `REVISIONI_MAX` | `2` | Facoltativa (default `2`): revisioni al massimo per turno; `0` = il revisore approva sempre |
 
 Le prime tre sono obbligatorie: se mancano o sono vuote, l'errore le elenca e rimanda a `.env.example`.
 
@@ -107,7 +110,7 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 .\.venv\Scripts\python.exe -m pytest -m reale -v
 ```
 
-Sono quattordici prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
+Sono diciassette prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
 precedente, due domande sull'ora nella stessa sessione (almeno una richiesta di `ora_corrente` per turno: il modello può
 chiamarla più volte nello stesso turno), l'ora
 di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`) e un calcolo («Quanto fa 12,5 per 8
@@ -122,8 +125,11 @@ la risposta contenere `28 marzo`), le note («Segnati che il microscopio 2 va ca
 centrifuga?» → `cerca_apparecchi` e la stanza `A03` nella risposta; «Quali apparecchi sono in manutenzione?» →
 `elenca_apparecchi` con `MIC-02` e `PHM-01`, nominati per codice o per nome nella risposta) e il router («Scrivimi
 una poesia sul mare.» → rifiuto, senza nessuna chiamata dell'agente nei log; «Cos'è il pH?» → in ambito, risposta
-dell'agente). Tutte passano dal router, che quindi non deve rifiutare le domande delle altre prove.
-Con un modello locale possono richiedere diversi minuti (il 09/11/2026, con `google/gemma-4-e4b`, 1247 s; ogni prova
+dell'agente) e il revisore (il revisore reale, interrogato direttamente, giudica non coerente la risposta parziale
+«Mancano 46 giorni a Natale.» a «Quanti giorni mancano a Natale e che giorno della settimana sarà?»; la stessa
+domanda al grafo produce una risposta con il numero e «venerdì»; «Quanto fa 12,5 per 8 meno 3?» è approvata al
+primo passaggio). Tutte passano da router e revisore, che quindi non devono rifiutare le domande delle altre prove.
+Con un modello locale possono richiedere diversi minuti (il 09/11/2026, con `google/gemma-4-e4b`, 1487 s; ogni prova
 fa più chiamate al modello e la prima carica il modello). Se il modello non chiama lo strumento la prova fallisce:
 il fallimento va riportato, non aggirato.
 
@@ -266,6 +272,43 @@ Nella stessa prova, per «Cos'è il pH?» il router ha esaurito il tetto dei tok
 domanda anche senza ragionamento): `[WARNING] router: errore (...)`, poi `router: conversazione (errore del router)`
 e la risposta dell'agente, come previsto.
 
+## Revisore della risposta
+
+Dopo la risposta dell'agente un terzo nodo LLM, il **revisore**, controlla che risponda davvero alla domanda:
+
+```text
+nodo_llm (risposta senza strumenti) → nodo_revisore ─coerente / limite→ nodo_pulizia → END
+                                                     └─non coerente→ nodo_llm (con l'indicazione del revisore)
+```
+
+- Le istruzioni sono in `revisore.txt` (`REVISORE_FILE`). Severità moderata: la risposta non è coerente solo se manca
+  una parte chiesta esplicitamente o se parla d'altro; stile, lunghezza e verità dei fatti non si giudicano; in caso
+  di dubbio è coerente.
+- Il revisore usa lo stesso client senza ragionamento del router (circa 7–10 s per risposta) e risponde con
+  `motivo` e poi `coerente`: con il verdetto per primo gemma approvava una risposta parziale pur scrivendo nel motivo
+  che mancava una parte.
+- Se non è coerente, l'agente riceve un'indicazione con il motivo e riscrive (anche con nuovi strumenti), fino a
+  `REVISIONI_MAX` volte (default 2; al limite resta l'ultima risposta, con un `[WARNING]`).
+- `nodo_pulizia` toglie dalla cronologia le bozze rifiutate e le indicazioni: si vede solo la risposta finale, e i
+  turni successivi non le ricevono. Il rifiuto del router non passa dal revisore.
+- Se il revisore non decide (errore, risposta illeggibile) la risposta è approvata, con un `[WARNING]`.
+
+Prova reale da pipe del 09/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`; uguale in Docker):
+
+```text
+[INFO] router: conversazione (Domanda su date e giorni della settimana.) in 9.1 s
+[INFO] instradamento: richiesta strumento giorni_tra {"data": "12-25"}
+[INFO] instradamento: richiesta strumento giorno_settimana {"data": "12-25"}
+[INFO] nodo_strumenti: giorni_tra -> da lunedì 9 novembre 2026 a venerdì 25 dicembre 2026: mancano 46 giorni
+[INFO] nodo_strumenti: giorno_settimana -> venerdì 25 dicembre 2026
+[INFO] instradamento: nessuno strumento -> fine
+[INFO] revisore: coerente (risposta completa) in 7.8 s
+Tu> Assistente> Mancano **46 giorni** a Natale (il 25 dicembre 2026). Sarà un **venerdì**.
+```
+
+(Righe di `nodo_llm` omesse.) Il percorso con un rifiuto e una nuova risposta è verificato dai test automatici con
+un agente simulato; il giudizio del revisore reale su una risposta parziale da una prova reale dedicata.
+
 ## Strumento orologio
 
 Per le domande su ora, data o giorno attuali il modello chiede lo strumento `ora_corrente` e il programma lo
@@ -317,8 +360,9 @@ Tu> Assistente> A New York sono le 05:47 di mercoledì 28 ottobre 2026 (ora EDT)
 Tu> Alla prossima!
 ```
 
-Il grafo ammette al massimo 12 passaggi per turno (10 per l'agente e gli strumenti, più router e rifiuto): se il
-modello continua a chiedere strumenti la chat stampa `Errore: limite di 12 passaggi raggiunto. Turno annullato.`,
+Il grafo ammette al massimo 20 passaggi per turno (10 per l'agente e gli strumenti, più router, revisioni e
+pulizia): se il modello continua a chiedere strumenti la chat stampa `Errore: limite di 20 passaggi raggiunto.
+Turno annullato.`,
 scarta il turno e prosegue.
 
 ## Giorni e scadenze (funzione nel grafo)
@@ -699,6 +743,9 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
 
 ## Diagnosi
 
+- **Il revisore fa riscrivere risposte corrette** (`revisore: non coerente (...)` su risposte complete): rendere
+  più permissivo `revisore.txt` oppure disattivare i giri con `REVISIONI_MAX=0`. `REVISIONI_MAX` non intero o
+  negativo ferma l'avvio con `Errore: REVISIONI_MAX non è valido ...` e codice 1.
 - **Una domanda legittima viene rifiutata** (`router: fuori ambito (...)` nel log): allargare la descrizione in
   `ambito.txt` (vale dal riavvio dell'assistente). Se manca il file, l'avvio termina con `Errore: File dell'ambito
   ... non trovato. Controllare AMBITO_FILE ...` e codice 1. Un `[WARNING] router: errore (...)` o `router: decisione
