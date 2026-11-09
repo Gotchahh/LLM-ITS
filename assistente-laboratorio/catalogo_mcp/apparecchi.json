@@ -1,0 +1,12 @@
+[
+  {"codice": "MIC-01", "nome": "Microscopio ottico 1", "tipo": "microscopio", "stanza": "B12", "stato": "disponibile", "ultima_calibrazione": "2026-09-15"},
+  {"codice": "MIC-02", "nome": "Microscopio ottico 2", "tipo": "microscopio", "stanza": "B12", "stato": "in manutenzione", "ultima_calibrazione": "2026-03-10", "note": "obiettivo 40x da sostituire"},
+  {"codice": "MIC-03", "nome": "Microscopio a fluorescenza", "tipo": "microscopio", "stanza": "B14", "stato": "in uso", "ultima_calibrazione": "2026-07-01"},
+  {"codice": "CEN-01", "nome": "Centrifuga da banco", "tipo": "centrifuga", "stanza": "A03", "stato": "disponibile", "ultima_calibrazione": "2026-06-20"},
+  {"codice": "CEN-02", "nome": "Centrifuga refrigerata", "tipo": "centrifuga", "stanza": "A03", "stato": "fuori servizio", "ultima_calibrazione": "2025-11-30", "note": "motore guasto, in attesa del tecnico"},
+  {"codice": "SPE-01", "nome": "Spettrofotometro UV-Vis", "tipo": "spettrofotometro", "stanza": "B14", "stato": "disponibile", "ultima_calibrazione": "2026-08-05"},
+  {"codice": "BIL-01", "nome": "Bilancia analitica", "tipo": "bilancia", "stanza": "A01", "stato": "disponibile", "ultima_calibrazione": "2026-10-01"},
+  {"codice": "PHM-01", "nome": "pHmetro da banco", "tipo": "pHmetro", "stanza": "A01", "stato": "in manutenzione", "ultima_calibrazione": "2026-02-14", "note": "elettrodo da ricalibrare"},
+  {"codice": "INC-01", "nome": "Incubatore a CO2", "tipo": "incubatore", "stanza": "C02", "stato": "in uso", "ultima_calibrazione": "2026-05-22"},
+  {"codice": "AUT-01", "nome": "Autoclave", "tipo": "autoclave", "stanza": "C01", "stato": "disponibile", "ultima_calibrazione": "2026-09-30"}
+]
