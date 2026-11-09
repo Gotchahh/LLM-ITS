@@ -1,4 +1,4 @@
-"""Client MCP: legge il catalogo del server della calcolatrice e rende sincroni i suoi strumenti.
+"""Client MCP: legge il catalogo dei server MCP (calcolatrice e catalogo) e rende sincroni i loro strumenti.
 
 È l'unico modulo dell'agente che importa `asyncio` e `langchain_mcp_adapters`: il resto del programma
 (grafo, CLI) resta sincrono e vede soltanto strumenti LangChain ordinari.
@@ -10,6 +10,7 @@ import re
 import sys
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
@@ -17,12 +18,25 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 
 logger = logging.getLogger(__name__)
 
-NOME_SERVER = "calcolatrice"
-STRUMENTO_RICHIESTO = "calcola"
-ARGOMENTI_SERVER = ("-m", "calcolatrice_mcp")
 CARTELLA_PROGETTO = Path(__file__).resolve().parent.parent
 
 PREFISSO_INGLESE = re.compile(r"^Error executing tool \S+: ")
+
+
+@dataclass(frozen=True)
+class ServerMCP:
+    """Un server MCP su stdio: nome, argomenti dell'interprete e strumenti che deve esporre."""
+
+    nome: str
+    argomenti: tuple[str, ...]
+    richiesti: tuple[str, ...]
+
+
+CALCOLATRICE = ServerMCP("calcolatrice", ("-m", "calcolatrice_mcp"), ("calcola",))
+CATALOGO = ServerMCP(
+    "catalogo", ("-m", "catalogo_mcp"), ("cerca_apparecchi", "dettaglio_apparecchio", "elenca_apparecchi")
+)
+SERVER_MCP = (CALCOLATRICE, CATALOGO)
 
 
 class ErroreMCP(Exception):
@@ -76,7 +90,7 @@ def _testo(contenuto) -> str:
     )
 
 
-def rendi_sincrono(strumento_mcp: BaseTool) -> BaseTool:
+def rendi_sincrono(strumento_mcp: BaseTool, server: str = CALCOLATRICE.nome) -> BaseTool:
     """Avvolge uno strumento MCP (solo asincrono) in uno strumento sincrono con lo stesso nome e schema.
 
     Ogni chiamata esegue `asyncio.run` sullo strumento originale. Gli errori restano distinti:
@@ -94,8 +108,8 @@ def rendi_sincrono(strumento_mcp: BaseTool) -> BaseTool:
             if isinstance(foglia, ToolException):
                 raise ToolException(PREFISSO_INGLESE.sub("", str(foglia))) from errore
             dettaglio = _dettaglio(errore)
-            logger.warning("client_mcp: server MCP %s non raggiungibile: %s", NOME_SERVER, dettaglio)
-            raise ErroreTrasportoMCP(f"server MCP {NOME_SERVER} non raggiungibile: {dettaglio}") from errore
+            logger.warning("client_mcp: server MCP %s non raggiungibile: %s", server, dettaglio)
+            raise ErroreTrasportoMCP(f"server MCP {server} non raggiungibile: {dettaglio}") from errore
         logger.info("client_mcp: %s eseguito in %.1f s", nome, time.perf_counter() - inizio)
         return _testo(contenuto)
 
@@ -107,31 +121,38 @@ def rendi_sincrono(strumento_mcp: BaseTool) -> BaseTool:
     )
 
 
-def carica_strumenti_mcp(argomenti: Sequence[str] = ARGOMENTI_SERVER) -> list[BaseTool]:
-    """Avvia il server MCP della calcolatrice, ne legge il catalogo e restituisce gli strumenti sincroni.
+def carica_server_mcp(server: ServerMCP) -> list[BaseTool]:
+    """Avvia un server MCP, ne legge il catalogo e restituisce gli strumenti sincroni.
 
     Il server si avvia con l'interprete corrente, dalla cartella del progetto. Se non parte, non espone
-    strumenti o non espone `calcola`, solleva `ErroreMCP` con un messaggio in italiano.
+    strumenti o non espone uno degli strumenti richiesti, solleva `ErroreMCP` con un messaggio in italiano.
     """
-    comando = " ".join([Path(sys.executable).name, *argomenti])
+    comando = " ".join([Path(sys.executable).name, *server.argomenti])
     connessione = {
         "transport": "stdio",
         "command": sys.executable,
-        "args": list(argomenti),
+        "args": list(server.argomenti),
         "cwd": str(CARTELLA_PROGETTO),
     }
-    client = MultiServerMCPClient({NOME_SERVER: connessione}, handle_tool_errors=False)
+    client = MultiServerMCPClient({server.nome: connessione}, handle_tool_errors=False)
     inizio = time.perf_counter()
     try:
         strumenti = _esegui(client.get_tools())
     except Exception as errore:
-        raise ErroreMCP(f"server MCP {NOME_SERVER} non avviato ({comando}): {_dettaglio(errore)}") from errore
+        raise ErroreMCP(f"server MCP {server.nome} non avviato ({comando}): {_dettaglio(errore)}") from errore
     if not strumenti:
-        raise ErroreMCP(f"il server MCP {NOME_SERVER} non espone strumenti")
-    if STRUMENTO_RICHIESTO not in {s.name for s in strumenti}:
-        raise ErroreMCP(f"il server MCP {NOME_SERVER} non espone lo strumento {STRUMENTO_RICHIESTO}")
+        raise ErroreMCP(f"il server MCP {server.nome} non espone strumenti")
+    nomi = {s.name for s in strumenti}
+    for richiesto in server.richiesti:
+        if richiesto not in nomi:
+            raise ErroreMCP(f"il server MCP {server.nome} non espone lo strumento {richiesto}")
     elenco = "; ".join(f"{s.name} ({s.description})" for s in strumenti)
     logger.info(
-        "client_mcp: catalogo di %s letto in %.1f s: %s", NOME_SERVER, time.perf_counter() - inizio, elenco
+        "client_mcp: catalogo di %s letto in %.1f s: %s", server.nome, time.perf_counter() - inizio, elenco
     )
-    return [rendi_sincrono(s) for s in strumenti]
+    return [rendi_sincrono(s, server.nome) for s in strumenti]
+
+
+def carica_strumenti_mcp(elenco: Sequence[ServerMCP] = SERVER_MCP) -> list[BaseTool]:
+    """Gli strumenti sincroni di tutti i server dell'elenco, nell'ordine; il primo server che fallisce ferma tutto."""
+    return [strumento for server in elenco for strumento in carica_server_mcp(server)]

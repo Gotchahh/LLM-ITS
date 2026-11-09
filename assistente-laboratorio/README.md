@@ -6,13 +6,15 @@ cronologia per la durata della sessione (nessuna persistenza). Il modello può c
 strumento orologio `ora_corrente`, i quattro strumenti del calendario `giorni_tra`, `sposta_data`,
 `giorno_settimana` e `pasqua` (vedi «Giorni e scadenze»), il convertitore di unità `converti` (vedi «Convertitore») e lo strumento
 `calcola` della calcolatrice, offerto da un server MCP (vedi «Calcolatrice»), e gli strumenti delle note
-`salva_nota`, `elenca_note` e `cancella_nota`, offerti da un'API FastAPI (vedi «Note»); il programma li esegue davvero.
+`salva_nota`, `elenca_note` e `cancella_nota`, offerti da un'API FastAPI (vedi «Note»), e gli strumenti del catalogo
+della strumentazione `cerca_apparecchi`, `dettaglio_apparecchio` ed `elenca_apparecchi`, offerti da un secondo server
+MCP (vedi «Catalogo della strumentazione»); il programma li esegue davvero.
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
 in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
 mancante sono del 02/11/2026; riprovati lo stesso giorno, con lo stesso esito, anche i messaggi d'errore della
-Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze e delle note del 09/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
+Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze, delle note e del catalogo del 09/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -103,7 +105,7 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 .\.venv\Scripts\python.exe -m pytest -m reale -v
 ```
 
-Sono dieci prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
+Sono dodici prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
 precedente, due domande sull'ora nella stessa sessione (almeno una richiesta di `ora_corrente` per turno: il modello può
 chiamarla più volte nello stesso turno), l'ora
 di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`) e un calcolo («Quanto fa 12,5 per 8
@@ -112,10 +114,12 @@ meno 3?»: il risultato `97` deve venire dallo strumento `calcola` e comparire n
 devono venire dallo strumento `converti`, e `0,04` e `68` comparire nella risposta), i giorni che mancano al
 25 dicembre (il risultato di `giorni_tra` deve coincidere con il numero calcolato sulla data reale di oggi, che deve
 comparire nella risposta), la Pasqua del 2027 (`pasqua` deve restituire `Pasqua 2027: domenica 28 marzo 2027` e
-la risposta contenere `28 marzo`) e le note («Segnati che il microscopio 2 va calibrato.» deve produrre un
+la risposta contenere `28 marzo`), le note («Segnati che il microscopio 2 va calibrato.» deve produrre un
 `salva_nota` riuscito e, in una conversazione nuova, «Che note ho?» un `elenca_note` con la nota e la parola
-`microscopio` nella risposta; il test avvia da sé il servizio su un DB temporaneo).
-Con un modello locale possono richiedere diversi minuti (il 09/11/2026, con `google/gemma-4-e4b`, 412 s; ogni prova
+`microscopio` nella risposta; il test avvia da sé il servizio su un DB temporaneo) e il catalogo («Dov'è la
+centrifuga?» → `cerca_apparecchi` e la stanza `A03` nella risposta; «Quali apparecchi sono in manutenzione?» →
+`elenca_apparecchi` con `MIC-02` e `PHM-01`, nominati per codice o per nome nella risposta).
+Con un modello locale possono richiedere diversi minuti (il 09/11/2026, con `google/gemma-4-e4b`, 825 s; ogni prova
 fa più chiamate al modello e la prima carica il modello). Se il modello non chiama lo strumento la prova fallisce:
 il fallimento va riportato, non aggirato.
 
@@ -129,6 +133,10 @@ in `tests/test_grafo.py` (il giro nel grafo con un modello finto, anche con erro
 
 I test del convertitore (senza modello) sono in `tests/test_convertitore.py` (conversioni, formato, nomi delle
 unità, errori) e in `tests/test_grafo.py` (il giro nel grafo con un modello finto, anche con errore).
+
+I test del catalogo (senza modello) sono in `tests/test_apparecchi.py` (logica pura e controllo del file JSON),
+`tests/test_server_catalogo.py` (il server avviato davvero su stdio), `tests/test_client_mcp.py` (i due server, errori
+d'avvio e di trasporto con il nome del server) e `tests/test_integrazione_mcp.py` (il grafo con un modello finto).
 
 I test della calcolatrice (tutti senza modello) sono in quattro file:
 
@@ -401,6 +409,44 @@ Nella stessa prova, a «Quanti metri sono 5 kg?» il modello ha risposto da solo
 chilogrammi e metri misurano grandezze diverse: la risposta era corretta, ma la spiegazione non veniva dal
 programma. I messaggi d'errore dello strumento sono verificati dai test automatici.
 
+## Catalogo della strumentazione (MCP)
+
+Per le domande sugli apparecchi del laboratorio il modello ha tre strumenti sugli stessi dati, offerti da un secondo
+server MCP (`catalogo_mcp/`, avviato dall'assistente con `python -m catalogo_mcp`, come la calcolatrice):
+
+- `cerca_apparecchi(testo)`: apparecchi con quel testo nel codice, nel nome, nel tipo o nelle note («dov'è la
+  centrifuga?»);
+- `dettaglio_apparecchio(codice)`: tutte le informazioni di un apparecchio, per esempio `MIC-02`;
+- `elenca_apparecchi(stanza, stato)`: elenco filtrato, con filtri facoltativi; stati ammessi `disponibile`,
+  `in uso`, `in manutenzione`, `fuori servizio`.
+
+Gli oggetti del laboratorio si chiamano «apparecchi» per non confonderli con gli strumenti del modello. I dati sono
+in `catalogo_mcp/apparecchi.json` (dieci apparecchi di esempio, non reali), letto all'avvio del server: una modifica
+vale dal riavvio dell'assistente, e un file non valido impedisce l'avvio con un messaggio che nomina il file.
+Ricerca e filtri non distinguono le maiuscole. Codice inesistente (`nessun apparecchio con codice «XYZ-99»`), stato
+non ammesso (con l'elenco degli stati) e ricerca vuota sono errori in italiano, che il modello deve riferire senza
+inventare apparecchi. Il catalogo è in sola lettura.
+
+Perché MCP: un server che raggruppa più strumenti su una stessa fonte di dati è il caso tipico del protocollo; il
+client (`assistente/client_mcp.py`, ora per più server) ne scopre il catalogo all'avvio. Se uno dei due server MCP
+non parte, l'avvio termina con un errore che nomina quel server e codice 1.
+
+Prova reale da pipe del 09/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`; uguale in Docker):
+
+```text
+[INFO] client_mcp: catalogo di catalogo letto in 0.9 s: cerca_apparecchi (...); dettaglio_apparecchio (...); elenca_apparecchi (...)
+[INFO] instradamento: richiesta strumento cerca_apparecchi {"testo": "centrifuga"}
+[INFO] nodo_strumenti: cerca_apparecchi -> CEN-01 Centrifuga da banco (centrifuga) — stanza A03, disponibile, calibrato il 20/06/2026
+CEN-02 Centrifuga refrigerata (centrifuga) — stanza A03, fuori servizio, calibrato il 30/11/2025
+Tu> Assistente> Ci sono due centrifughe registrate:
+[INFO] instradamento: richiesta strumento elenca_apparecchi {"stato": "in manutenzione"}
+[INFO] nodo_strumenti: elenca_apparecchi -> MIC-02 Microscopio ottico 2 (microscopio) — stanza B12, in manutenzione, calibrato il 10/03/2026
+PHM-01 pHmetro da banco (pHmetro) — stanza A01, in manutenzione, calibrato il 14/02/2026
+Tu> Assistente> Ci sono due apparecchi attualmente in manutenzione:
+```
+
+(Le descrizioni del catalogo sono abbreviate con `...`; le risposte continuano su più righe con l'elenco.)
+
 ## Calcolatrice (strumento MCP)
 
 Per i calcoli il modello chiede lo strumento `calcola`, con un solo argomento testuale `espressione` (per
@@ -613,6 +659,10 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
 
 ## Diagnosi
 
+- **Il catalogo non parte** (`Errore: server MCP catalogo non avviato (...)` all'avvio, codice 1): di solito
+  `catalogo_mcp/apparecchi.json` non è valido dopo una modifica (JSON malformato, campo mancante, stato non ammesso,
+  data non `AAAA-MM-GG`). Il messaggio del server si legge con `.\.venv\Scripts\python.exe -m catalogo_mcp`, che con
+  un file valido resta in attesa sullo standard input (chiudere con Ctrl+C).
 - **Le note non funzionano** («servizio note non raggiungibile ...» nel log o nella risposta): in locale avviare
   `.\.venv\Scripts\python.exe -m note_api` in un secondo terminale e controllare `NOTE_API_URL`. Con il servizio
   spento l'assistente parte comunque, con un avviso; su Windows l'avvio richiede qualche secondo in più per i
