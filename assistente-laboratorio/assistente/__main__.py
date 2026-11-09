@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+from assistente.calendario import crea_strumenti_calendario
 from assistente.cli import crea_indicatore_attesa, esegui_chat, prepara_terminale
 from assistente.client_mcp import ErroreMCP, carica_strumenti_mcp
 from assistente.config import (
@@ -39,7 +40,12 @@ def main() -> int:
     except (ErroreConfigurazione, ErroreServer, ErroreMCP) as errore:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1
-    strumenti = [crea_strumento_orologio(config.fuso), crea_strumento_convertitore(), *strumenti_mcp]
+    strumenti = [
+        crea_strumento_orologio(config.fuso),
+        *crea_strumenti_calendario(config.fuso),
+        crea_strumento_convertitore(),
+        *strumenti_mcp,
+    ]
     grafo = costruisci_grafo(crea_modello(config), strumenti)
     esegui_chat(
         grafo,
