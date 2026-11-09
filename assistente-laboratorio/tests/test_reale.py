@@ -9,10 +9,11 @@ import pytest
 
 from assistente.calendario import crea_strumenti_calendario, leggi_data
 from assistente.client_mcp import carica_strumenti_mcp
-from assistente.config import carica_configurazione, leggi_ambito, leggi_file_env
+from assistente.config import carica_configurazione, leggi_ambito, leggi_file_env, leggi_revisore
 from assistente.convertitore import crea_strumento_convertitore
 from assistente.grafo import costruisci_grafo, esegui_turno
 from assistente.modello import crea_modello, crea_modello_router, leggi_modelli_disponibili, verifica_modello
+from assistente.revisore import SCHEMA_REVISORE, e_indicazione, leggi_valutazione, messaggi_per_il_revisore
 from assistente.router import INIZIO_RIFIUTO
 from assistente.note import crea_strumenti_note
 from assistente.strumenti import crea_strumento_orologio
@@ -41,7 +42,10 @@ def grafo(config, servizio_note):
         *carica_strumenti_mcp(),
     ]
     ambito = leggi_ambito(RADICE / "ambito.txt")
-    return costruisci_grafo(crea_modello(config), strumenti, ambito, crea_modello_router(config))
+    revisore = leggi_revisore(RADICE / "revisore.txt")
+    return costruisci_grafo(
+        crea_modello(config), strumenti, ambito, crea_modello_router(config), revisore, config.revisioni_max
+    )
 
 
 def test_reale_risposta_ordinaria(grafo):
@@ -152,3 +156,36 @@ def test_reale_domanda_scientifica(grafo, caplog):
     cronologia = esegui_turno(grafo, [], "Cos'è il pH?")
     assert not cronologia[-1].text.startswith(INIZIO_RIFIUTO) and cronologia[-1].text.strip()
     assert any(m.startswith("nodo_llm:") for m in caplog.messages)
+
+
+DOMANDA_IN_DUE_PARTI = "Quanti giorni mancano a Natale e che giorno della settimana sarà?"
+
+
+def test_reale_revisore_rifiuta_risposta_parziale(config):
+    revisore = crea_modello_router(config).with_structured_output(
+        SCHEMA_REVISORE, method="json_schema", include_raw=True
+    )
+    messaggi = messaggi_per_il_revisore(
+        leggi_revisore(RADICE / "revisore.txt"), DOMANDA_IN_DUE_PARTI, "Mancano 46 giorni a Natale."
+    )
+    coerente, motivo = leggi_valutazione(revisore.invoke(messaggi))
+    assert coerente is False and motivo
+
+
+def test_reale_domanda_in_due_parti(grafo, config, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    oggi = datetime.now(config.fuso).date()
+    n = (leggi_data("12-25", oggi) - oggi).days
+    cronologia = esegui_turno(grafo, [], DOMANDA_IN_DUE_PARTI)
+    risposta = cronologia[-1].text
+    assert str(n) in risposta and "venerdì" in risposta.lower()
+    assert not any(e_indicazione(m) for m in cronologia)
+    assert any(m.startswith("revisore: ") for m in caplog.messages)
+
+
+def test_reale_risposta_approvata(grafo, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    cronologia = esegui_turno(grafo, [], "Quanto fa 12,5 per 8 meno 3?")
+    assert "97" in cronologia[-1].text
+    assert any(m.startswith("revisore: coerente") for m in caplog.messages)
+    assert not any(m.startswith("revisore: non coerente") for m in caplog.messages)

@@ -16,6 +16,7 @@ from assistente.client_mcp import ErroreMCP
 def ambito_del_progetto(monkeypatch):
     """I test di `main` girano anche in cartelle temporanee: l'ambito è quello del progetto."""
     monkeypatch.setenv("AMBITO_FILE", str(Path(__file__).resolve().parent.parent / "ambito.txt"))
+    monkeypatch.setenv("REVISORE_FILE", str(Path(__file__).resolve().parent.parent / "revisore.txt"))
 
 
 @pytest.fixture(autouse=True)
@@ -176,11 +177,13 @@ def test_main_passa_al_grafo_l_ambito_e_il_modello_del_router(monkeypatch):
     monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
     ricevuti = []
     monkeypatch.setattr(avvio, "costruisci_grafo",
-                        lambda modello, strumenti, ambito, router: ricevuti.append((modello, ambito, router)) or "grafo")
+                        lambda modello, strumenti, ambito, router, revisore, revisioni:
+                        ricevuti.append((modello, ambito, router, revisore, revisioni)) or "grafo")
     monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: None)
     assert avvio.main() == 0
-    modello, ambito, router = ricevuti[0]
-    assert (modello, router) == ("agente", "router") and "laboratorio" in ambito
+    modello, ambito, router, revisore, revisioni = ricevuti[0]
+    assert (modello, router, revisioni) == ("agente", "router", 2) and "laboratorio" in ambito
+    assert "coerente" in revisore
 
 
 def test_main_ambito_mancante_uscita_1(monkeypatch, tmp_path):
@@ -191,3 +194,11 @@ def test_main_ambito_mancante_uscita_1(monkeypatch, tmp_path):
     monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
     codice, errori = esegui_main_con_errore(monkeypatch)
     assert codice == 1 and errori.startswith("Errore: ") and "AMBITO_FILE" in errori and "Traceback" not in errori
+
+
+def test_main_revisioni_max_non_valido_uscita_1(monkeypatch):
+    for nome, valore in VALIDO.items():
+        monkeypatch.setenv(nome, valore)
+    monkeypatch.setenv("REVISIONI_MAX", "due")
+    codice, errori = esegui_main_con_errore(monkeypatch)
+    assert codice == 1 and errori.startswith("Errore: REVISIONI_MAX") and "Traceback" not in errori

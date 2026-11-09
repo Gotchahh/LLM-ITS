@@ -13,6 +13,7 @@ from assistente.config import (
     carica_configurazione,
     configura_log,
     leggi_ambito,
+    leggi_revisore,
     leggi_file_env,
 )
 from assistente.convertitore import crea_strumento_convertitore
@@ -42,6 +43,7 @@ def main() -> int:
         config = carica_configurazione(ambiente)
         configura_log(config.livello_log)
         ambito = leggi_ambito(config.ambito_file)
+        revisore = leggi_revisore(config.revisore_file)
         verifica_modello(config.modello, leggi_modelli_disponibili(config.base_url))
         strumenti_mcp = carica_strumenti_mcp()
     except (ErroreConfigurazione, ErroreServer, ErroreMCP) as errore:
@@ -59,7 +61,9 @@ def main() -> int:
         *crea_strumenti_note(config.note_url, config.fuso),
         *strumenti_mcp,
     ]
-    grafo = costruisci_grafo(crea_modello(config), strumenti, ambito, crea_modello_router(config))
+    grafo = costruisci_grafo(
+        crea_modello(config), strumenti, ambito, crea_modello_router(config), revisore, config.revisioni_max
+    )
     esegui_chat(
         grafo,
         config.base_url,

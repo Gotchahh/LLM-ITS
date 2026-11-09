@@ -40,9 +40,11 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
     istante iniettabile).
   - `convertitore.py`: strumento `converti` (lunghezze, pesi, temperature; logica pura e fabbrica dello strumento).
   - `modello.py`: `ChatOpenAI` verso LM Studio e controllo dell'elenco modelli all'avvio.
-  - `grafo.py`: stato, nodi e instradamento; `costruisci_grafo(modello, strumenti, ambito, modello_router)`.
+  - `grafo.py`: stato, nodi e instradamento; `costruisci_grafo(modello, strumenti, ambito, modello_router, revisore, revisioni_max)`.
   - `router.py`: schema della decisione del router, messaggi da classificare, rifiuto; il prompt del router è
     `ambito.txt` (variabile `AMBITO_FILE`).
+  - `revisore.py`: schema della valutazione del revisore (motivo prima del verdetto), indicazione per l'agente;
+    istruzioni in `revisore.txt` (`REVISORE_FILE`), limite `REVISIONI_MAX`.
   - `cli.py`, `__main__.py`: ciclo di chat, cronologia, comandi `/esci` e `/log`, scritta «Ragionando...».
   - `note.py`: strumenti `salva_nota`, `elenca_note`, `cancella_nota`, wrapper `urllib` verso il servizio delle
     note (`NOTE_API_URL`).
@@ -67,7 +69,7 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   librerie MCP resta confinata nel modulo client MCP.
 - LM Studio sull'host, raggiunto tramite la sua API compatibile con OpenAI.
 - Indirizzo del server e identificativo del modello solo da variabili d'ambiente
-  (`LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`; inoltre `APP_TIMEZONE`, `LOG_LEVEL`, `NOTE_API_URL` e `AMBITO_FILE`).
+  (`LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`; inoltre `APP_TIMEZONE`, `LOG_LEVEL`, `NOTE_API_URL`, `AMBITO_FILE`, `REVISORE_FILE` e `REVISIONI_MAX`).
   L'identificativo è quello restituito dal server (`GET /v1/models`), mai inventato.
 - Un file di configurazione di esempio senza credenziali; il file reale (`.env`) resta fuori da Git.
 - Docker Compose per l'applicazione; LM Studio non va containerizzato. Dallo step 9 della Lezione 6 un

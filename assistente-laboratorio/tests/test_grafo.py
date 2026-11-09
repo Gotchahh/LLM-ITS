@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import ModelloFinto, chat, decisione, porta_libera
+from conftest import ModelloFinto, chat, decisione, porta_libera, valutazione
 from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool, ToolException, tool
 from langgraph.errors import GraphRecursionError
@@ -115,7 +115,7 @@ def test_il_turno_e_invocato_con_il_limite_di_passaggi():
 
     spia = GrafoSpia()
     esegui_turno(spia, [], "ciao")
-    assert LIMITE_PASSAGGI == 12 and spia.config == {"recursion_limit": LIMITE_PASSAGGI}
+    assert LIMITE_PASSAGGI == 20 and spia.config == {"recursion_limit": LIMITE_PASSAGGI}
 
 
 def test_percorso_con_strumento(caplog):
@@ -416,3 +416,85 @@ def test_modello_router_separato():
     router = ModelloFinto([], decisioni=[decisione("conversazione", "saluto")])
     esegui_turno(costruisci_grafo(agente, [], AMBITO, router), [], "ciao")
     assert len(router.chiamate_router) == 1 and agente.chiamate_router == []
+
+
+REVISORE = "Istruzioni del revisore di prova."
+DOMANDA = "Quanti giorni mancano a Natale e che giorno della settimana sarà?"
+
+
+def test_revisore_approva_subito(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([AIMessage("Mancano 46 giorni, venerdì.")], valutazioni=[valutazione(True, "completa")])
+    nuova = esegui_turno(costruisci_grafo(finto, [], revisore=REVISORE), [], DOMANDA)
+    assert [m.type for m in nuova] == ["human", "ai"] and len(finto.chiamate) == 1
+    assert len(finto.chiamate_revisore) == 1 and finto.chiamate_revisore[0][0].text == REVISORE
+    assert any(m.startswith("revisore: coerente (completa) in ") for m in caplog.messages)
+
+
+def test_revisore_rifiuta_una_volta(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([AIMessage("Mancano 46 giorni."), AIMessage("Mancano 46 giorni; sarà venerdì.")],
+                         valutazioni=[valutazione(False, "manca il giorno della settimana"), valutazione(True, "ok")])
+    nuova = esegui_turno(costruisci_grafo(finto, [], revisore=REVISORE), [], DOMANDA)
+    assert [m.type for m in nuova] == ["human", "ai"] and nuova[-1].text == "Mancano 46 giorni; sarà venerdì."
+    secondo = finto.chiamate[1]
+    assert "manca il giorno della settimana" in secondo[-1].text and DOMANDA in secondo[-1].text
+    assert any("revisione 1 di 2" in m for m in caplog.messages)
+    assert "nodo_pulizia: rimossi 2 messaggi di revisione" in caplog.messages
+
+
+def test_revisore_rifiuta_sempre(caplog):
+    finto = ModelloFinto([AIMessage(f"Bozza {i}") for i in range(3)],
+                         valutazioni=[valutazione(False, "incompleta")] * 3)
+    nuova = esegui_turno(costruisci_grafo(finto, [], revisore=REVISORE), [], DOMANDA)
+    assert len(finto.chiamate) == 3 and len(finto.chiamate_revisore) == 3
+    assert [m.type for m in nuova] == ["human", "ai"] and nuova[-1].text == "Bozza 2"
+    assert any(r.levelno == logging.WARNING and "limite di revisioni raggiunto" in r.getMessage() for r in caplog.records)
+
+
+def test_revisioni_max_zero():
+    finto = ModelloFinto([AIMessage("Bozza")], valutazioni=[valutazione(False, "incompleta")])
+    nuova = esegui_turno(costruisci_grafo(finto, [], revisore=REVISORE, revisioni_max=0), [], DOMANDA)
+    assert nuova[-1].text == "Bozza" and len(finto.chiamate) == 1 and len(finto.chiamate_revisore) == 1
+
+
+@pytest.mark.parametrize("voce, avviso", [
+    (RuntimeError("limite di lunghezza"), "revisore: errore (RuntimeError), la risposta è approvata"),
+    ({"raw": None, "parsed": None, "parsing_error": ValueError("x")}, "revisore: valutazione illeggibile, la risposta è approvata"),
+])
+def test_errore_e_valutazione_illeggibile_approvano(caplog, voce, avviso):
+    finto = ModelloFinto([AIMessage("Risposta")], valutazioni=[voce])
+    nuova = esegui_turno(costruisci_grafo(finto, [], revisore=REVISORE), [], DOMANDA)
+    assert nuova[-1].text == "Risposta" and len(finto.chiamate) == 1
+    assert avviso in [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+
+def test_revisione_dopo_gli_strumenti():
+    finto = ModelloFinto([chiamata("c1"), AIMessage("Sono le 16:42."), AIMessage("Sono le 16:42 di lunedì.")],
+                         valutazioni=[valutazione(False, "manca il giorno"), valutazione(True, "ok")])
+    nuova = esegui_turno(costruisci_grafo(finto, [orologio], revisore=REVISORE), [], "Che ore sono e che giorno è?")
+    assert [m.type for m in nuova] == ["human", "ai", "tool", "ai"]
+    assert nuova[1].tool_calls and nuova[2].tool_call_id == "c1" and nuova[-1].text == "Sono le 16:42 di lunedì."
+
+
+def test_due_turni_con_revisione():
+    finto = ModelloFinto([AIMessage("R1 bozza"), AIMessage("R1"), AIMessage("R2")],
+                         valutazioni=[valutazione(False, "incompleta"), valutazione(True, "ok"), valutazione(True, "ok")])
+    grafo = costruisci_grafo(finto, [], revisore=REVISORE)
+    cronologia = esegui_turno(grafo, [], "D1")
+    cronologia = esegui_turno(grafo, cronologia, "D2")
+    assert [m.text for m in cronologia] == ["D1", "R1", "D2", "R2"]
+    assert "D2" in finto.chiamate_revisore[-1][1].text
+    assert [m.text for m in finto.chiamate[-1]][1:] == ["D1", "R1", "D2"]
+
+
+def test_rifiuto_del_router_senza_revisore():
+    finto = ModelloFinto([], decisioni=[decisione("fuori_ambito", "poesia")])
+    esegui_turno(costruisci_grafo(finto, [], AMBITO, revisore=REVISORE), [], "una poesia")
+    assert finto.chiamate_revisore == [] and finto.chiamate == []
+
+
+def test_senza_revisore_nessuna_revisione():
+    finto = ModelloFinto([AIMessage("Ciao!")])
+    esegui_turno(costruisci_grafo(finto, []), [], "ciao")
+    assert finto.chiamate_revisore == []

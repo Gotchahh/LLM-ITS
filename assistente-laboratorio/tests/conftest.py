@@ -49,28 +49,34 @@ class ModelloFinto:
     in `strumenti_associati`.
     """
 
-    def __init__(self, risposte, decisioni=()):
+    def __init__(self, risposte, decisioni=(), valutazioni=()):
         self.risposte = list(risposte)
         self.chiamate = []
         self.strumenti_associati = []
         self.decisioni = list(decisioni)
         self.chiamate_router = []
         self.opzioni_router = []
+        self.valutazioni = list(valutazioni)
+        self.chiamate_revisore = []
 
     def with_structured_output(self, schema, **opzioni):
-        """Router simulato: restituisce o solleva, nell'ordine, le voci di `decisioni`."""
-        self.opzioni_router.append(opzioni)
-        modello = self
+        """Router o revisore simulato, scelto dal titolo dello schema: restituisce o solleva, nell'ordine,
+        le voci di `decisioni` (router) o di `valutazioni` (revisore)."""
+        if schema["title"] == "valutazione_revisore":
+            coda, chiamate = self.valutazioni, self.chiamate_revisore
+        else:
+            self.opzioni_router.append(opzioni)
+            coda, chiamate = self.decisioni, self.chiamate_router
 
-        class RouterFinto:
+        class Finto:
             def invoke(self, messaggi):
-                modello.chiamate_router.append(list(messaggi))
-                voce = modello.decisioni.pop(0)
+                chiamate.append(list(messaggi))
+                voce = coda.pop(0)
                 if isinstance(voce, BaseException):
                     raise voce
                 return voce
 
-        return RouterFinto()
+        return Finto()
 
     def bind_tools(self, strumenti):
         self.strumenti_associati.append(strumenti)
@@ -145,3 +151,8 @@ def servizio_note(tmp_path_factory):
 def decisione(categoria, motivo):
     """Voce di `ModelloFinto.decisioni` come la restituisce `with_structured_output(..., include_raw=True)`."""
     return {"raw": None, "parsed": {"categoria": categoria, "motivo": motivo}, "parsing_error": None}
+
+
+def valutazione(coerente, motivo):
+    """Voce di `ModelloFinto.valutazioni` come la restituisce `with_structured_output(..., include_raw=True)`."""
+    return {"raw": None, "parsed": {"coerente": coerente, "motivo": motivo}, "parsing_error": None}
