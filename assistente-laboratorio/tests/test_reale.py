@@ -1,10 +1,12 @@
 """Prove con LM Studio attivo: `python -m pytest -m reale -v` (escluse di default)."""
 
 import os
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
+from assistente.calendario import crea_strumenti_calendario, leggi_data
 from assistente.client_mcp import carica_strumenti_mcp
 from assistente.config import carica_configurazione, leggi_file_env
 from assistente.convertitore import crea_strumento_convertitore
@@ -18,11 +20,21 @@ FILE_ENV = Path(__file__).resolve().parent.parent / ".env"
 
 
 @pytest.fixture(scope="module")
-def grafo():
-    """Grafo collegato al modello reale, con la configurazione di `.env` e dell'ambiente come in `main`."""
-    config = carica_configurazione({**leggi_file_env(FILE_ENV), **os.environ})
+def config():
+    """Configurazione di `.env` e dell'ambiente, come in `main`."""
+    return carica_configurazione({**leggi_file_env(FILE_ENV), **os.environ})
+
+
+@pytest.fixture(scope="module")
+def grafo(config):
+    """Grafo collegato al modello reale, con gli stessi strumenti di `main`."""
     verifica_modello(config.modello, leggi_modelli_disponibili(config.base_url))
-    strumenti = [crea_strumento_orologio(config.fuso), crea_strumento_convertitore(), *carica_strumenti_mcp()]
+    strumenti = [
+        crea_strumento_orologio(config.fuso),
+        *crea_strumenti_calendario(config.fuso),
+        crea_strumento_convertitore(),
+        *carica_strumenti_mcp(),
+    ]
     return costruisci_grafo(crea_modello(config), strumenti)
 
 
@@ -76,3 +88,20 @@ def test_reale_conversione_temperatura(grafo):
     cronologia = esegui_turno(grafo, [], "Quanti gradi Fahrenheit sono 20 °C?")
     risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "converti"]
     assert "20 °C = 68 °F" in risultati and "68" in cronologia[-1].text
+
+
+def test_reale_giorni_al_25_dicembre(grafo, config):
+    oggi = datetime.now(config.fuso).date()
+    n = (leggi_data("12-25", oggi) - oggi).days
+    cronologia = esegui_turno(grafo, [], "Quanti giorni mancano al 25 dicembre?")
+    risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "giorni_tra"]
+    atteso = "è oggi" if n == 0 else f"mancano {n} giorni"
+    assert any(r.endswith(atteso) for r in risultati)
+    assert n == 0 or str(n) in cronologia[-1].text
+
+
+def test_reale_pasqua_2027(grafo):
+    cronologia = esegui_turno(grafo, [], "Che giorno è Pasqua nel 2027?")
+    risultati = [m.content for m in cronologia if m.type == "tool" and m.name == "pasqua"]
+    assert "Pasqua 2027: domenica 28 marzo 2027" in risultati
+    assert "28 marzo" in cronologia[-1].text
