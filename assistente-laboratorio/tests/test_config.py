@@ -10,6 +10,7 @@ from assistente.config import (
     carica_configurazione,
     configura_log,
     leggi_ambito,
+    leggi_revisore,
     leggi_file_env,
 )
 
@@ -172,3 +173,31 @@ def test_leggi_ambito_non_valido(tmp_path, contenuto):
 def test_ambito_del_progetto():
     testo = leggi_ambito(Path(__file__).resolve().parent.parent / "ambito.txt")
     assert "laboratorio" in testo and "fuori_ambito" in testo and "conversazione" in testo
+
+
+def test_configurazione_del_revisore():
+    c = carica_configurazione(VALIDO)
+    assert (c.revisore_file, c.revisioni_max) == (Path("revisore.txt"), 2)
+    assert carica_configurazione({**VALIDO, "REVISORE_FILE": " r.txt "}).revisore_file == Path("r.txt")
+    assert carica_configurazione({**VALIDO, "REVISIONI_MAX": "0"}).revisioni_max == 0
+    assert carica_configurazione({**VALIDO, "REVISIONI_MAX": " 3 "}).revisioni_max == 3
+
+
+@pytest.mark.parametrize("valore", ["due", "-1", "1.5"])
+def test_revisioni_max_non_valido(valore):
+    with pytest.raises(ErroreConfigurazione, match="REVISIONI_MAX"):
+        carica_configurazione({**VALIDO, "REVISIONI_MAX": valore})
+
+
+@pytest.mark.parametrize("contenuto", [None, "  \n"])
+def test_leggi_revisore_non_valido(tmp_path, contenuto):
+    percorso = tmp_path / "revisore.txt"
+    if contenuto is not None:
+        percorso.write_text(contenuto, encoding="utf-8")
+    with pytest.raises(ErroreConfigurazione) as errore:
+        leggi_revisore(percorso)
+    assert "REVISORE_FILE" in str(errore.value) and "revisore" in str(errore.value)
+
+
+def test_revisore_del_progetto():
+    assert "coerente" in leggi_revisore(Path(__file__).resolve().parent.parent / "revisore.txt")
