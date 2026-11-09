@@ -5,7 +5,23 @@ services:
     environment:
       # Nel container localhost è il container stesso: LM Studio sta sull'host.
       LMSTUDIO_BASE_URL: http://host.docker.internal:1234/v1
+      # Il servizio delle note si raggiunge con il nome del servizio Compose.
+      NOTE_API_URL: http://note:8000
+    depends_on:
+      - note
     stdin_open: true
     tty: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  note:
+    build: .
+    command: ["python", "-m", "note_api"]
+    environment:
+      # In ascolto su tutte le interfacce del container, perché l'assistente arriva da un altro container.
+      NOTE_HOST: 0.0.0.0
+    volumes:
+      - note-dati:/app/dati
+
+volumes:
+  note-dati:
