@@ -37,10 +37,12 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   - `cli.py`, `__main__.py`: ciclo di chat, cronologia, comandi `/esci` e `/log`, scritta «Ragionando...».
   - `note.py`: strumenti `salva_nota`, `elenca_note`, `cancella_nota`, wrapper `urllib` verso il servizio delle
     note (`NOTE_API_URL`).
-  - `client_mcp.py`: discovery del server MCP della calcolatrice e strumenti MCP resi sincroni (unico modulo con
-    `asyncio` e `langchain_mcp_adapters`).
+  - `client_mcp.py`: discovery dei server MCP (`SERVER_MCP`: calcolatrice e catalogo) e strumenti MCP resi sincroni
+    (unico modulo con `asyncio` e `langchain_mcp_adapters`).
 - `calcolatrice_mcp/`: server MCP della calcolatrice (`calcolo.py` logica pura, `server.py` FastMCP su stdio),
   avviato dall'assistente con `python -m calcolatrice_mcp`; non importa nulla da `assistente/`.
+- `catalogo_mcp/`: server MCP del catalogo degli apparecchi (`apparecchi.py` logica pura, `apparecchi.json` dati,
+  `server.py` FastMCP su stdio con tre strumenti), avviato con `python -m catalogo_mcp`; non importa da `assistente/`.
 - `note_api/`: servizio FastAPI delle note (`archivio.py` SQLite, `server.py` endpoint), avviato con
   `python -m note_api` (`NOTE_DB`, `NOTE_HOST`, `NOTE_PORT`); non importa nulla da `assistente/`. `dati/` fuori da Git.
 - `tests/`: test automatici senza modello; `test_reale.py` contiene le prove con LM Studio (marcatore `reale`).
