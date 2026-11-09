@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import ModelloFinto, chat, porta_libera
+from conftest import ModelloFinto, chat, decisione, porta_libera
 from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool, ToolException, tool
 from langgraph.errors import GraphRecursionError
@@ -115,7 +115,7 @@ def test_il_turno_e_invocato_con_il_limite_di_passaggi():
 
     spia = GrafoSpia()
     esegui_turno(spia, [], "ciao")
-    assert LIMITE_PASSAGGI == 10 and spia.config == {"recursion_limit": LIMITE_PASSAGGI}
+    assert LIMITE_PASSAGGI == 12 and spia.config == {"recursion_limit": LIMITE_PASSAGGI}
 
 
 def test_percorso_con_strumento(caplog):
@@ -170,7 +170,7 @@ def test_limite_di_passaggi():
 def test_limite_di_passaggi_in_chat():
     finto = ModelloFinto([chiamata(f"c{i}") for i in range(20)] + [AIMessage("Eccomi")])
     uscita = chat(costruisci_grafo(finto, [orologio]), ["D1", "/esci"])
-    assert "Errore: limite di 10 passaggi raggiunto. Turno annullato." in uscita
+    assert f"Errore: limite di {LIMITE_PASSAGGI} passaggi raggiunto. Turno annullato." in uscita
 
 
 def test_risposta_con_testo_e_richiesta_va_agli_strumenti():
@@ -335,3 +335,84 @@ def test_il_prompt_chiede_il_catalogo():
     assert "chiama lo strumento converti" in PROMPT_DI_SISTEMA
     assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
     assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
+
+
+AMBITO = "Ambito di prova: scienze e laboratorio."
+
+
+def test_in_ambito_passa_all_agente(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([AIMessage("Ciao!")], decisioni=[decisione("conversazione", "saluto")])
+    nuova = esegui_turno(costruisci_grafo(finto, [], AMBITO), [], "ciao")
+    assert [m.type for m in nuova] == ["human", "ai"] and nuova[-1].text == "Ciao!"
+    assert any(m.startswith("router: conversazione (saluto) in ") for m in caplog.messages)
+    assert len(finto.chiamate) == 1
+    assert finto.opzioni_router == [{"method": "json_schema", "include_raw": True}]
+
+
+def test_fuori_ambito_rifiuta_senza_agente(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([], decisioni=[decisione("fuori_ambito", "richiesta di una poesia")])
+    nuova = esegui_turno(costruisci_grafo(finto, [crea_strumento_convertitore()], AMBITO), [], "una poesia")
+    assert [m.type for m in nuova] == ["human", "ai"]
+    assert nuova[-1].text == "Posso aiutarti solo con domande scientifiche o sul laboratorio: richiesta di una poesia."
+    assert finto.chiamate == []
+    assert any(m.startswith("router: fuori ambito (richiesta di una poesia) in ") for m in caplog.messages)
+    assert "nodo_rifiuto: domanda fuori ambito" in caplog.messages
+    assert not any(m.startswith(("nodo_llm", "nodo_strumenti")) for m in caplog.messages)
+
+
+def test_decisione_illeggibile_passa_all_agente():
+    illeggibile = {"raw": None, "parsed": None, "parsing_error": ValueError("JSON rotto")}
+    finto = ModelloFinto([AIMessage("Risposta")], decisioni=[illeggibile])
+    nuova = esegui_turno(costruisci_grafo(finto, [], AMBITO), [], "?")
+    assert nuova[-1].text == "Risposta"
+
+
+def test_eccezione_del_router_passa_all_agente(caplog):
+    finto = ModelloFinto([AIMessage("Risposta")], decisioni=[RuntimeError("limite di lunghezza")])
+    nuova = esegui_turno(costruisci_grafo(finto, [], AMBITO), [], "?")
+    assert nuova[-1].text == "Risposta"
+    assert any(r.levelno == logging.WARNING and "router: errore (RuntimeError), la domanda passa" in r.getMessage()
+               for r in caplog.records)
+
+
+def test_turno_dopo_un_rifiuto():
+    finto = ModelloFinto([AIMessage("Il pH misura l'acidità.")], decisioni=[
+        decisione("fuori_ambito", "sport"), decisione("conversazione", "chimica")])
+    grafo = costruisci_grafo(finto, [], AMBITO)
+    cronologia = esegui_turno(grafo, [], "chi vince il campionato?")
+    cronologia = esegui_turno(grafo, cronologia, "cos'è il pH?")
+    assert [m.type for m in cronologia] == ["human", "ai", "human", "ai"]
+    assert cronologia[-1].text == "Il pH misura l'acidità."
+
+
+def test_il_router_riceve_l_ambito_e_non_i_messaggi_degli_strumenti():
+    finto = ModelloFinto([chiamata("c1"), AIMessage("Sono le 16:42."), AIMessage("Prego!")],
+                         decisioni=[decisione("conversazione", "ora"), decisione("conversazione", "grazie")])
+    grafo = costruisci_grafo(finto, [orologio], AMBITO)
+    cronologia = esegui_turno(grafo, [], "Che ore sono?")
+    esegui_turno(grafo, cronologia, "grazie")
+    secondo = finto.chiamate_router[1]
+    assert secondo[0].type == "system" and AMBITO in secondo[0].text
+    assert [m.type for m in secondo[1:]] == ["human", "ai", "human"]
+
+
+def test_senza_ambito_nessun_router():
+    finto = ModelloFinto([AIMessage("Ciao!")])
+    esegui_turno(costruisci_grafo(finto, []), [], "ciao")
+    assert finto.chiamate_router == [] and finto.opzioni_router == []
+
+
+def test_quattro_giri_di_strumenti_con_il_router():
+    finto = ModelloFinto([chiamata(f"c{i}") for i in range(4)] + [AIMessage("Fatto")],
+                         decisioni=[decisione("conversazione", "ora")])
+    nuova = esegui_turno(costruisci_grafo(finto, [orologio], AMBITO), [], "?")
+    assert nuova[-1].text == "Fatto"
+
+
+def test_modello_router_separato():
+    agente = ModelloFinto([AIMessage("Ciao!")])
+    router = ModelloFinto([], decisioni=[decisione("conversazione", "saluto")])
+    esegui_turno(costruisci_grafo(agente, [], AMBITO, router), [], "ciao")
+    assert len(router.chiamate_router) == 1 and agente.chiamate_router == []

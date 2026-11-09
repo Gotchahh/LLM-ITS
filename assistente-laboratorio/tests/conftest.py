@@ -49,10 +49,28 @@ class ModelloFinto:
     in `strumenti_associati`.
     """
 
-    def __init__(self, risposte):
+    def __init__(self, risposte, decisioni=()):
         self.risposte = list(risposte)
         self.chiamate = []
         self.strumenti_associati = []
+        self.decisioni = list(decisioni)
+        self.chiamate_router = []
+        self.opzioni_router = []
+
+    def with_structured_output(self, schema, **opzioni):
+        """Router simulato: restituisce o solleva, nell'ordine, le voci di `decisioni`."""
+        self.opzioni_router.append(opzioni)
+        modello = self
+
+        class RouterFinto:
+            def invoke(self, messaggi):
+                modello.chiamate_router.append(list(messaggi))
+                voce = modello.decisioni.pop(0)
+                if isinstance(voce, BaseException):
+                    raise voce
+                return voce
+
+        return RouterFinto()
 
     def bind_tools(self, strumenti):
         self.strumenti_associati.append(strumenti)
@@ -122,3 +140,8 @@ def servizio_note(tmp_path_factory):
     yield f"http://127.0.0.1:{porta}"
     server.should_exit = True
     thread.join(timeout=10)
+
+
+def decisione(categoria, motivo):
+    """Voce di `ModelloFinto.decisioni` come la restituisce `with_structured_output(..., include_raw=True)`."""
+    return {"raw": None, "parsed": {"categoria": categoria, "motivo": motivo}, "parsing_error": None}

@@ -12,6 +12,7 @@ from assistente.config import Configurazione, ErroreConfigurazione
 CHIAVE_API = "lm-studio"  # segnaposto: LM Studio non controlla la chiave, ma il client ne vuole una
 TIMEOUT_CONTROLLO = 5.0
 TIMEOUT_MODELLO = 180.0
+TOKEN_ROUTER = 80  # la decisione del router è breve: un tetto ferma le risposte che degenerano
 
 
 class ErroreServer(RuntimeError):
@@ -67,4 +68,21 @@ def crea_modello(config: Configurazione) -> ChatOpenAI:
         temperature=0,
         timeout=TIMEOUT_MODELLO,
         max_retries=1,
+    )
+
+
+def crea_modello_router(config: Configurazione) -> ChatOpenAI:
+    """Client del modello per il router: come `crea_modello`, senza ragionamento e con un tetto ai token.
+
+    Con il ragionamento attivo gemma impiega circa 50 s per decidere; senza, circa 9 s (prove del 09/11/2026).
+    """
+    return ChatOpenAI(
+        model=config.modello,
+        base_url=config.base_url,
+        api_key=CHIAVE_API,
+        temperature=0,
+        timeout=TIMEOUT_MODELLO,
+        max_retries=1,
+        reasoning_effort="none",
+        max_tokens=TOKEN_ROUTER,
     )

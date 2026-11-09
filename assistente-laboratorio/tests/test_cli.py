@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage
 from langgraph.errors import GraphRecursionError
 
 from assistente.cli import IndicatoreAttesa, crea_indicatore_attesa, prepara_terminale
-from assistente.grafo import costruisci_grafo
+from assistente.grafo import LIMITE_PASSAGGI, costruisci_grafo
 
 
 def test_righe_vuote_e_spazi_ignorati():                              # Review Focus 1
@@ -88,7 +88,7 @@ def test_errore_generico_con_traceback_nel_log_di_debug(caplog):
 def test_limite_di_passaggi_raggiunto():
     finto = ModelloFinto([GraphRecursionError("troppi passaggi")])
     uscita = chat(costruisci_grafo(finto, []), ["D1"])
-    assert uscita[0] == "Errore: limite di 10 passaggi raggiunto. Turno annullato."
+    assert uscita[0] == f"Errore: limite di {LIMITE_PASSAGGI} passaggi raggiunto. Turno annullato."
 
 
 def test_risposta_non_valida_del_modello():

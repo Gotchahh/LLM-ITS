@@ -13,6 +13,12 @@ from assistente.client_mcp import ErroreMCP
 
 
 @pytest.fixture(autouse=True)
+def ambito_del_progetto(monkeypatch):
+    """I test di `main` girano anche in cartelle temporanee: l'ambito è quello del progetto."""
+    monkeypatch.setenv("AMBITO_FILE", str(Path(__file__).resolve().parent.parent / "ambito.txt"))
+
+
+@pytest.fixture(autouse=True)
 def servizio_note_presente(monkeypatch):
     """Nessuna connessione vera al servizio delle note (su Windows un rifiuto costa circa 2 s)."""
     monkeypatch.setattr(avvio, "servizio_raggiungibile", lambda url: True)
@@ -49,7 +55,7 @@ def test_main_prepara_i_flussi_non_interattivi_prima_della_chat(monkeypatch):
         monkeypatch.setenv(nome, valore)
     monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
     monkeypatch.setattr(avvio, "crea_modello", lambda config: object())
-    monkeypatch.setattr(avvio, "costruisci_grafo", lambda modello, strumenti: "grafo")
+    monkeypatch.setattr(avvio, "costruisci_grafo", lambda *argomenti: "grafo")
     ricevuto = []
 
     def chat_finta(grafo, server, **opzioni):
@@ -134,7 +140,8 @@ def test_main_passa_al_grafo_l_orologio_e_gli_strumenti_mcp(monkeypatch):
     calcola_finta = StructuredTool.from_function(func=lambda espressione: "4", name="calcola", description="prova")
     monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [calcola_finta])
     ricevuti = []
-    monkeypatch.setattr(avvio, "costruisci_grafo", lambda modello, strumenti: ricevuti.append(strumenti) or "grafo")
+    monkeypatch.setattr(avvio, "costruisci_grafo",
+                        lambda modello, strumenti, *altri: ricevuti.append(strumenti) or "grafo")
     monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: None)
     assert avvio.main() == 0
     assert [s.name for s in ricevuti[0]] == [
@@ -150,10 +157,37 @@ def test_main_con_servizio_note_spento_avvisa_e_parte(monkeypatch, caplog):
     monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
     monkeypatch.setattr(avvio, "crea_modello", lambda config: object())
     monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
-    monkeypatch.setattr(avvio, "costruisci_grafo", lambda modello, strumenti: "grafo")
+    monkeypatch.setattr(avvio, "costruisci_grafo", lambda *argomenti: "grafo")
     avviata = []
     monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: avviata.append(True))
     monkeypatch.setattr(avvio, "servizio_raggiungibile", lambda url: False)
     assert avvio.main() == 0
     assert avviata == [True]
     assert any("servizio note non raggiungibile" in m for m in caplog.messages)
+
+
+def test_main_passa_al_grafo_l_ambito_e_il_modello_del_router(monkeypatch):
+    usa_flussi_finti(monkeypatch)
+    for nome, valore in VALIDO.items():
+        monkeypatch.setenv(nome, valore)
+    monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
+    monkeypatch.setattr(avvio, "crea_modello", lambda config: "agente")
+    monkeypatch.setattr(avvio, "crea_modello_router", lambda config: "router")
+    monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
+    ricevuti = []
+    monkeypatch.setattr(avvio, "costruisci_grafo",
+                        lambda modello, strumenti, ambito, router: ricevuti.append((modello, ambito, router)) or "grafo")
+    monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: None)
+    assert avvio.main() == 0
+    modello, ambito, router = ricevuti[0]
+    assert (modello, router) == ("agente", "router") and "laboratorio" in ambito
+
+
+def test_main_ambito_mancante_uscita_1(monkeypatch, tmp_path):
+    for nome, valore in VALIDO.items():
+        monkeypatch.setenv(nome, valore)
+    monkeypatch.setenv("AMBITO_FILE", str(tmp_path / "manca.txt"))
+    monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
+    monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
+    codice, errori = esegui_main_con_errore(monkeypatch)
+    assert codice == 1 and errori.startswith("Errore: ") and "AMBITO_FILE" in errori and "Traceback" not in errori

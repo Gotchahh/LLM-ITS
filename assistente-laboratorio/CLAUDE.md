@@ -7,20 +7,27 @@ La cartella del progetto è `assistente-laboratorio/`; i comandi si eseguono da 
 Un'applicazione da terminale in Python che conversa con un modello locale e:
 - organizza il flusso in un grafo LangGraph esplicito (stato, nodi, instradamento riconoscibili);
 - usa un modello servito da LM Studio, che resta sul computer host;
-- conserva la cronologia della conversazione per la durata della sessione (nessuna persistenza);
+- conserva la cronologia della conversazione per la durata della sessione nella CLI; dallo step 7 della
+  Lezione 6 le chat dell'interfaccia web sono salvate dal back-end in PostgreSQL;
 - offre uno strumento orologio con fuso orario esplicito, richiesto dal modello tramite tool calling
   ed eseguito davvero dal programma;
 - dalla Lezione 5 offre altri strumenti, eseguiti con lo stesso ciclo del grafo (richiesta del modello →
   esecuzione → `ToolMessage` correlato → nuova chiamata al modello) e ottenuti con tre modalità:
   funzione Python nel grafo, API HTTP con FastAPI, server MCP;
+- dalla Lezione 6 evolve in nove step, uno alla volta e in ordine: router, revisore e riassunto della
+  cronologia (nodi LLM aggiuntivi nel grafo); resource e prompt MCP; agente come servizio HTTP, back-end con
+  PostgreSQL, front-end web di chat, Docker Compose con un container per componente;
 - si avvia anche con Docker Compose.
 
 ## Confini
-- Implementare solo i requisiti concordati. Lezione 5: le sei funzionalità proposte (calcolatrice,
-  convertitore, giorni e scadenze, note, catalogo, meteo), una alla volta, ciascuna con una delle tre
-  modalità: funzione nel grafo, API FastAPI, MCP. La modalità è scelta e motivata nella specifica della
-  feature. L'orologio resta locale. Non anticipare workflow e RAG.
-- Niente interfacce grafiche, servizi cloud o framework non concordati.
+- Implementare solo i requisiti concordati. Lezione 5 (conclusa): calcolatrice, convertitore, giorni e
+  scadenze, note, catalogo, ciascuna con una delle tre modalità (funzione nel grafo, API FastAPI, MCP);
+  il meteo è stato abbandonato. L'orologio resta locale.
+- Lezione 6: gli step si fanno uno per volta, nell'ordine delle slide, ciascuno su un'implementazione
+  funzionante e verificata dello step precedente; estendere senza riscrivere e non anticipare gli step
+  successivi. Non anticipare workflow e RAG.
+- Interfaccia web ammessa dallo step 8 (front-end), con la tecnologia scelta nella specifica dello step;
+  PostgreSQL ammesso dallo step 7. Niente servizi cloud né framework non concordati.
 - Lavorare solo dentro `assistente-laboratorio/`. La repository contiene altre lezioni:
   non leggerle per copiarne il codice e non modificarle.
 - Lavorare nel branch `feature/<nome>` della feature in corso; nessun worktree.
@@ -33,7 +40,9 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
     istante iniettabile).
   - `convertitore.py`: strumento `converti` (lunghezze, pesi, temperature; logica pura e fabbrica dello strumento).
   - `modello.py`: `ChatOpenAI` verso LM Studio e controllo dell'elenco modelli all'avvio.
-  - `grafo.py`: stato, nodi e instradamento; `costruisci_grafo(modello, strumenti)`.
+  - `grafo.py`: stato, nodi e instradamento; `costruisci_grafo(modello, strumenti, ambito, modello_router)`.
+  - `router.py`: schema della decisione del router, messaggi da classificare, rifiuto; il prompt del router è
+    `ambito.txt` (variabile `AMBITO_FILE`).
   - `cli.py`, `__main__.py`: ciclo di chat, cronologia, comandi `/esci` e `/log`, scritta «Ragionando...».
   - `note.py`: strumenti `salva_nota`, `elenca_note`, `cancella_nota`, wrapper `urllib` verso il servizio delle
     note (`NOTE_API_URL`).
@@ -58,10 +67,13 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   librerie MCP resta confinata nel modulo client MCP.
 - LM Studio sull'host, raggiunto tramite la sua API compatibile con OpenAI.
 - Indirizzo del server e identificativo del modello solo da variabili d'ambiente
-  (`LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`; inoltre `APP_TIMEZONE`, `LOG_LEVEL` e `NOTE_API_URL`).
+  (`LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`; inoltre `APP_TIMEZONE`, `LOG_LEVEL`, `NOTE_API_URL` e `AMBITO_FILE`).
   L'identificativo è quello restituito dal server (`GET /v1/models`), mai inventato.
 - Un file di configurazione di esempio senza credenziali; il file reale (`.env`) resta fuori da Git.
-- Docker Compose per l'applicazione; LM Studio non va containerizzato.
+- Docker Compose per l'applicazione; LM Studio non va containerizzato. Dallo step 9 della Lezione 6 un
+  container per componente (front-end, back-end, agente, PostgreSQL); credenziali del database solo in `.env`.
+- Nodi LLM aggiuntivi (router, revisore, riassunto) usano lo stesso modello di LM Studio con prompt di sistema
+  diversi; i testi che li configurano (per esempio l'ambito dell'agente) stanno in configurazione, non nel codice.
 - Dipendenze motivate, concordate e con versioni fissate in `requirements.txt`; `pytest` solo in
   `requirements-dev.txt`. Le dipendenze di una feature si aggiungono solo con quella feature, con versione
   fissata e verificata su Python 3.14.7.

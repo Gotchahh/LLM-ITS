@@ -5,6 +5,7 @@ from assistente.config import ErroreConfigurazione, carica_configurazione
 from assistente.modello import (
     ErroreServer,
     crea_modello,
+    crea_modello_router,
     estrai_identificativi,
     leggi_modelli_disponibili,
     verifica_modello,
@@ -49,3 +50,10 @@ def test_crea_modello_usa_la_configurazione():
     m = crea_modello(carica_configurazione(VALIDO))
     assert (m.model_name, m.temperature, m.max_retries) == ("google/gemma-4-e4b", 0, 1)
     assert str(m.openai_api_base).rstrip("/") == "http://localhost:1234/v1"
+
+
+def test_modello_del_router_senza_ragionamento():
+    config = carica_configurazione(VALIDO)
+    router = crea_modello_router(config)
+    assert router.reasoning_effort == "none" and router.max_tokens == 80
+    assert router.model_name == crea_modello(config).model_name

@@ -3,17 +3,19 @@
 import json
 import logging
 import time
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 
+from assistente.router import SCHEMA_ROUTER, leggi_decisione, messaggi_per_il_router, testo_rifiuto
+
 logger = logging.getLogger(__name__)
 
-LIMITE_PASSAGGI = 10
+LIMITE_PASSAGGI = 12  # 10 per l'agente e gli strumenti, più router e rifiuto
 
 PROMPT_DI_SISTEMA = (
     "Sei l'assistente del laboratorio e rispondi sempre in italiano. "
@@ -51,9 +53,16 @@ class RispostaNonValida(Exception):
 
 
 class Stato(TypedDict):
-    """Stato del grafo: la cronologia dei messaggi, in aggiunta a ogni passaggio."""
+    """Stato del grafo: la cronologia dei messaggi, in aggiunta a ogni passaggio, e la decisione del router."""
 
     messages: Annotated[list[AnyMessage], add_messages]
+    categoria: NotRequired[str]
+    motivo_router: NotRequired[str]
+
+
+def instrada_router(stato: Stato) -> str:
+    """Arco condizionale dopo `nodo_router`: "nodo_llm" se la domanda è in ambito, altrimenti "nodo_rifiuto"."""
+    return "nodo_rifiuto" if stato.get("categoria") == "fuori_ambito" else "nodo_llm"
 
 
 def instrada(stato: Stato) -> str:
@@ -71,13 +80,21 @@ def instrada(stato: Stato) -> str:
     return "nodo_strumenti"
 
 
-def costruisci_grafo(modello, strumenti: list[BaseTool]) -> CompiledStateGraph:
+def costruisci_grafo(
+    modello, strumenti: list[BaseTool], ambito: str | None = None, modello_router=None
+) -> CompiledStateGraph:
     """Costruisce il grafo attorno a `modello` e agli `strumenti`.
 
     START -> nodo_llm -> (instrada) -> nodo_strumenti | END, e nodo_strumenti -> nodo_llm.
+    Con `ambito` il grafo parte da nodo_router, che manda le domande fuori ambito a nodo_rifiuto -> END;
+    il router usa `modello_router` (predefinito: `modello`) senza strumenti e con l'ambito come prompt.
     Gli strumenti vengono associati al modello una volta sola, e solo se l'elenco non è vuoto:
     un elenco `tools` vuoto può essere rifiutato dall'API.
     """
+    if ambito is not None:
+        router = (modello_router or modello).with_structured_output(
+            SCHEMA_ROUTER, method="json_schema", include_raw=True
+        )
     if strumenti:
         modello = modello.bind_tools(strumenti)
     per_nome = {strumento.name: strumento for strumento in strumenti}
@@ -132,10 +149,35 @@ def costruisci_grafo(modello, strumenti: list[BaseTool]) -> CompiledStateGraph:
             )
         return {"messages": risposte}
 
+    def nodo_router(stato: Stato) -> dict:
+        """Classifica l'ultima domanda; qualsiasi errore del router fa passare la domanda all'agente."""
+        messaggi = [SystemMessage(ambito), *messaggi_per_il_router(stato["messages"])]
+        inizio = time.perf_counter()
+        try:
+            categoria, motivo = leggi_decisione(router.invoke(messaggi))
+        except Exception as errore:
+            logger.warning("router: errore (%s), la domanda passa all'agente", type(errore).__name__)
+            categoria, motivo = "conversazione", "errore del router"
+        descrizione = "fuori ambito" if categoria == "fuori_ambito" else categoria
+        logger.info("router: %s (%s) in %.1f s", descrizione, motivo, time.perf_counter() - inizio)
+        return {"categoria": categoria, "motivo_router": motivo}
+
+    def nodo_rifiuto(stato: Stato) -> dict:
+        """Risponde con il rifiuto senza chiamare l'agente."""
+        logger.info("nodo_rifiuto: domanda fuori ambito")
+        return {"messages": [AIMessage(testo_rifiuto(stato["motivo_router"]))]}
+
     costruttore = StateGraph(Stato)
     costruttore.add_node("nodo_llm", nodo_llm)
     costruttore.add_node("nodo_strumenti", nodo_strumenti)
-    costruttore.add_edge(START, "nodo_llm")
+    if ambito is None:
+        costruttore.add_edge(START, "nodo_llm")
+    else:
+        costruttore.add_node("nodo_router", nodo_router)
+        costruttore.add_node("nodo_rifiuto", nodo_rifiuto)
+        costruttore.add_edge(START, "nodo_router")
+        costruttore.add_conditional_edges("nodo_router", instrada_router, ["nodo_llm", "nodo_rifiuto"])
+        costruttore.add_edge("nodo_rifiuto", END)
     costruttore.add_conditional_edges("nodo_llm", instrada, ["nodo_strumenti", END])
     costruttore.add_edge("nodo_strumenti", "nodo_llm")
     return costruttore.compile()
