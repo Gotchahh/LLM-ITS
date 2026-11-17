@@ -116,6 +116,7 @@ def costruisci_grafo(
     riassunto_istruzioni: str | None = None,
     riassunto_soglia: int = 20,
     riassunto_turni: int = 2,
+    modello_riassunto=None,
 ) -> CompiledStateGraph:
     """Costruisce il grafo attorno a `modello` e agli `strumenti`.
 
@@ -127,7 +128,8 @@ def costruisci_grafo(
     indicazioni e il turno finisce. Il revisore usa lo stesso modello del router.
     Con `riassunto_istruzioni` il grafo parte da nodo_riassunto: oltre `riassunto_soglia` messaggi sostituisce i
     turni più vecchi con un riassunto, lasciando intatti gli ultimi `riassunto_turni` turni e la domanda in corso;
-    usa lo stesso modello del router, senza strumenti. Agente e router ricevono il riassunto nel prompt di sistema.
+    usa `modello_riassunto` (predefinito: il modello del router), senza strumenti. Agente e router ricevono il
+    riassunto nel prompt di sistema.
     Gli strumenti vengono associati al modello una volta sola, e solo se l'elenco non è vuoto:
     un elenco `tools` vuoto può essere rifiutato dall'API.
     """
@@ -139,7 +141,7 @@ def costruisci_grafo(
         revisore_llm = (modello_router or modello).with_structured_output(
             SCHEMA_REVISORE, method="json_schema", include_raw=True
         )
-    modello_ausiliario = modello_router or modello
+    modello_del_riassunto = modello_riassunto or modello_router or modello
     if strumenti:
         modello = modello.bind_tools(strumenti)
     per_nome = {strumento.name: strumento for strumento in strumenti}
@@ -259,7 +261,7 @@ def costruisci_grafo(
         )
         inizio = time.perf_counter()
         try:
-            nuovo = modello_ausiliario.invoke(richiesta).text.strip()
+            nuovo = modello_del_riassunto.invoke(richiesta).text.strip()
         except Exception as errore:
             logger.warning("riassunto: errore (%s), cronologia invariata", type(errore).__name__)
             return {}

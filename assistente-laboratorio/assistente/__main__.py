@@ -22,6 +22,7 @@ from assistente.grafo import costruisci_grafo
 from assistente.modello import (
     ErroreServer,
     crea_modello,
+    crea_modello_riassunto,
     crea_modello_router,
     leggi_modelli_disponibili,
     verifica_modello,
@@ -68,6 +69,7 @@ def main() -> int:
         riassunto_istruzioni=riassunto,
         riassunto_soglia=config.riassunto_soglia,
         riassunto_turni=config.riassunto_turni,
+        modello_riassunto=crea_modello_riassunto(config),
     )
     esegui_chat(
         grafo,

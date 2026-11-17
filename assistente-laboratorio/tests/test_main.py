@@ -175,6 +175,7 @@ def test_main_passa_al_grafo_l_ambito_e_il_modello_del_router(monkeypatch):
     monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
     monkeypatch.setattr(avvio, "crea_modello", lambda config: "agente")
     monkeypatch.setattr(avvio, "crea_modello_router", lambda config: "router")
+    monkeypatch.setattr(avvio, "crea_modello_riassunto", lambda config: "riassunto")
     monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
     ricevuti = []
     monkeypatch.setattr(avvio, "costruisci_grafo",
@@ -187,6 +188,7 @@ def test_main_passa_al_grafo_l_ambito_e_il_modello_del_router(monkeypatch):
     assert "coerente" in revisore
     assert "nome" in riassunto["riassunto_istruzioni"]
     assert (riassunto["riassunto_soglia"], riassunto["riassunto_turni"]) == (20, 2)
+    assert riassunto["modello_riassunto"] == "riassunto"
 
 
 def test_main_ambito_mancante_uscita_1(monkeypatch, tmp_path):

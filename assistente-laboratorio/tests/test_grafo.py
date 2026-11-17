@@ -627,3 +627,13 @@ def test_senza_istruzioni_nessun_nodo_riassunto():
 def test_esegui_turno_resta_compatibile():
     nuova = esegui_turno(grafo_con_riassunto(ModelloFinto([AIMessage("R1")]), ModelloFinto([])), [], "D1")
     assert [m.text for m in nuova] == ["D1", "R1"]
+
+
+def test_modello_riassunto_separato_dal_router():
+    router = ModelloFinto([], decisioni=[decisione("conversazione", "ok")])
+    riassunto = ModelloFinto([AIMessage("Riassunto")])
+    _, testo = esegui_turno_con_riassunto(
+        costruisci_grafo(ModelloFinto([AIMessage("R5")]), [], AMBITO, router, riassunto_istruzioni=RIASSUMI,
+                         riassunto_soglia=6, riassunto_turni=1, modello_riassunto=riassunto),
+        turni_precedenti(4), "", "D5")
+    assert testo == "Riassunto" and len(riassunto.chiamate) == 1 and router.chiamate == []
