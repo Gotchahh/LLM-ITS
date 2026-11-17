@@ -2,11 +2,18 @@ Riassumi la conversazione tra l'utente e l'assistente di un laboratorio scientif
 ricevi l'eventuale riassunto precedente e la trascrizione dei turni più vecchi, e scrivi un unico riassunto
 aggiornato che prende il posto del precedente.
 
+Esempio.
+Trascrizione:
+Utente: Ciao, sono Ada, faccio la tecnica di biologia. Che ore sono?
+Strumento ora_corrente: 2026-03-02T09:10:00+01:00 (Europe/Rome)
+Assistente: Ciao Ada! Sono le 9:10.
+Riassunto corretto: L'utente si chiama Ada ed è tecnica di biologia. Ha chiesto l'ora.
+(Il nome resta per esteso; l'orario no, perché invecchia: l'assistente lo chiederà di nuovo allo strumento.)
+
 Regole:
-- in italiano, in terza persona, al massimo una decina di righe brevi;
-- conserva le informazioni stabili: il nome dell'utente e che cosa fa, le sue preferenze, le decisioni prese,
-  le note salvate o cancellate, gli apparecchi e gli argomenti trattati, le domande lasciate aperte;
-- tieni ciò che il riassunto precedente diceva e che resta vero;
-- non conservare ora, data o altri risultati che invecchiano: l'assistente li chiederà di nuovo agli strumenti;
-- non inventare nulla che non sia nella trascrizione o nel riassunto precedente;
+- scrivi sempre il nome dell'utente per esteso, se è noto, anche se viene dal riassunto precedente;
+- non scrivere mai orari, date o altri valori che invecchiano: di' solo che l'utente li ha chiesti;
+- conserva che cosa fa l'utente, preferenze, decisioni, note salvate o cancellate, apparecchi e argomenti trattati,
+  domande lasciate aperte;
+- in italiano, in terza persona, al massimo una decina di righe brevi; non inventare nulla;
 - rispondi solo con il testo del riassunto, senza titoli né premesse.
