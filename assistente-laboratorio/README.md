@@ -11,12 +11,14 @@ della strumentazione `cerca_apparecchi`, `dettaglio_apparecchio` ed `elenca_appa
 MCP (vedi «Catalogo della strumentazione»); il programma li esegue davvero. Prima dell'agente un router controlla
 che la domanda sia scientifica o sul laboratorio e rifiuta le altre (vedi «Router dell'ambito»); dopo la risposta
 un revisore controlla che risponda a tutta la domanda e, se no, la fa riscrivere (vedi «Revisore della risposta»).
+Quando la conversazione si allunga, all'inizio del turno un nodo di riassunto sostituisce i turni più vecchi con un
+riassunto e lascia intatti gli ultimi (vedi «Riassunto della cronologia»).
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
 in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
 mancante sono del 02/11/2026; riprovati lo stesso giorno, con lo stesso esito, anche i messaggi d'errore della
-Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze, delle note, del catalogo, del router e del revisore del 09/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
+Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze, delle note, del catalogo, del router e del revisore del 09/11/2026; quelle del riassunto della cronologia del 17/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -62,6 +64,9 @@ Se `.env` esiste già il comando lo sovrascrive: in quel caso modificare il file
 | `AMBITO_FILE` | `ambito.txt` | Facoltativa (default `ambito.txt`): file con l'ambito dell'agente, usato dal router |
 | `REVISORE_FILE` | `revisore.txt` | Facoltativa (default `revisore.txt`): istruzioni del revisore della risposta |
 | `REVISIONI_MAX` | `2` | Facoltativa (default `2`): revisioni al massimo per turno; `0` = il revisore approva sempre |
+| `RIASSUNTO_FILE` | `riassunto.txt` | Facoltativa (default `riassunto.txt`): istruzioni del riassunto della cronologia |
+| `RIASSUNTO_SOGLIA` | `20` | Facoltativa (default `20`): oltre questo numero di messaggi si riassumono i turni più vecchi; intero da 1 in su |
+| `RIASSUNTO_TURNI` | `2` | Facoltativa (default `2`): turni recenti lasciati intatti, oltre alla domanda in corso; intero da 1 in su |
 
 Le prime tre sono obbligatorie: se mancano o sono vuote, l'errore le elenca e rimanda a `.env.example`.
 
@@ -110,7 +115,7 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 .\.venv\Scripts\python.exe -m pytest -m reale -v
 ```
 
-Sono diciassette prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
+Sono venti prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
 precedente, due domande sull'ora nella stessa sessione (almeno una richiesta di `ora_corrente` per turno: il modello può
 chiamarla più volte nello stesso turno), l'ora
 di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`) e un calcolo («Quanto fa 12,5 per 8
@@ -128,8 +133,12 @@ una poesia sul mare.» → rifiuto, senza nessuna chiamata dell'agente nei log; 
 dell'agente) e il revisore (il revisore reale, interrogato direttamente, giudica non coerente la risposta parziale
 «Mancano 46 giorni a Natale.» a «Quanti giorni mancano a Natale e che giorno della settimana sarà?»; la stessa
 domanda al grafo produce una risposta con il numero e «venerdì»; «Quanto fa 12,5 per 8 meno 3?» è approvata al
-primo passaggio). Tutte passano da router e revisore, che quindi non devono rifiutare le domande delle altre prove.
-Con un modello locale possono richiedere diversi minuti (il 09/11/2026, con `google/gemma-4-e4b`, 1487 s; ogni prova
+primo passaggio) e il riassunto (il riassunto reale, interrogato direttamente, scrive «Ottavio» per esteso, sia da una
+presentazione breve sia da una più lunga che chiede l'ora, e non riporta l'orario; con soglia 4 e un turno conservato,
+«Ciao, mi chiamo Ottavio.», un calcolo, una conversione e «Come mi chiamo?» producono almeno una compressione nel log,
+il primo turno esce dalla cronologia e la risposta finale contiene «Ottavio»). Tutte passano da router e revisore, che
+quindi non devono rifiutare le domande delle altre prove; nessuna delle prove brevi arriva alla soglia del riassunto.
+Con un modello locale possono richiedere diversi minuti (il 17/11/2026, con `google/gemma-4-e4b`, 1754 s; ogni prova
 fa più chiamate al modello e la prima carica il modello). Se il modello non chiama lo strumento la prova fallisce:
 il fallimento va riportato, non aggirato.
 
@@ -309,6 +318,66 @@ Tu> Assistente> Mancano **46 giorni** a Natale (il 25 dicembre 2026). Sarà un *
 (Righe di `nodo_llm` omesse.) Il percorso con un rifiuto e una nuova risposta è verificato dai test automatici con
 un agente simulato; il giudizio del revisore reale su una risposta parziale da una prova reale dedicata.
 
+## Riassunto della cronologia
+
+Con un modello locale il contesto è limitato e ogni turno aggiunge messaggi. All'inizio del turno un quarto nodo LLM,
+il **riassunto**, sostituisce i turni più vecchi con un riassunto e lascia intatti gli ultimi:
+
+```text
+START → nodo_riassunto → nodo_router → nodo_llm ⇄ nodo_strumenti → nodo_revisore → … (come sopra)
+```
+
+- Si riassume solo quando la cronologia, domanda del turno compresa, supera `RIASSUNTO_SOGLIA` messaggi (default 20;
+  contano anche richieste e risultati degli strumenti). Sotto la soglia il modello non viene chiamato.
+- Restano intatti gli ultimi `RIASSUNTO_TURNI` turni (default 2) e la domanda in corso. Il taglio cade sempre prima di
+  una domanda dell'utente, quindi una richiesta di strumento non viene mai separata dal suo risultato.
+- Il riassunto è un campo dello stato: a ogni compressione il modello riceve il riassunto precedente e i turni da
+  togliere e ne scrive uno nuovo, che **sostituisce** il precedente. Dura quanto la sessione, come la cronologia; un
+  turno fallito lascia cronologia e riassunto com'erano.
+- Le istruzioni sono in `riassunto.txt` (`RIASSUNTO_FILE`): il nome dell'utente sempre per esteso, preferenze,
+  decisioni, note e argomenti trattati; mai orari o date, che l'assistente chiede di nuovo agli strumenti. Con regole
+  generiche gemma scriveva «si è presentato dicendo il suo nome» senza il nome, oppure copiava l'orario: le istruzioni
+  contengono un esempio che mostra entrambe le cose.
+- Il riassunto usa un client senza ragionamento con un tetto di 400 token (quello del router, 80, lo troncherebbe).
+- L'agente riceve il riassunto come primo messaggio della conversazione, dopo il prompt di sistema e solo nella
+  chiamata: dentro il prompt di sistema gemma lo ignorava e, in un secondo messaggio di sistema, smetteva di chiamare
+  gli strumenti (prove del 17/11/2026). Il router lo riceve in coda al suo prompt; il revisore no.
+- Se il riassunto non riesce (errore, risposta vuota o troncata al tetto dei token) la cronologia resta com'era, con un `[WARNING]`, e il turno
+  prosegue.
+
+Prova reale da pipe del 17/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`, PowerShell senza `PYTHONIOENCODING`),
+con soglia e turni abbassati solo per la sessione:
+
+```powershell
+$env:RIASSUNTO_SOGLIA = "4"
+$env:RIASSUNTO_TURNI = "1"
+"Ciao, mi chiamo Ottavio.`nQuanto fa 12 per 7?`nQuanti centimetri sono 3 pollici?`nCome mi chiamo?`n/esci" | .\.venv\Scripts\python.exe -m assistente
+Remove-Item Env:RIASSUNTO_SOGLIA, Env:RIASSUNTO_TURNI
+```
+
+```text
+Tu> Assistente> Ciao Ottavio, piacere di conoscerti! Sono qui per assisterti con qualsiasi cosa riguardi il laboratorio. Come posso aiutarti oggi?
+[INFO] instradamento: richiesta strumento calcola {"espressione": "12*7"}
+[INFO] nodo_strumenti: calcola -> 84
+Tu> Assistente> 12 per 7 fa **84**.
+[INFO] riassunto: 7 messaggi -> 5 in 6.9 s
+[INFO] instradamento: richiesta strumento converti {"a": "centimetri", "da": "pollici", "valore": 3}
+[INFO] nodo_strumenti: converti -> 3 in = 7,62 cm
+Tu> Assistente> 3 pollici sono **7,62 cm**.
+[INFO] riassunto: 9 messaggi -> 5 in 12.4 s
+Tu> Assistente> Lei si chiama Ottavio.
+Tu> Alla prossima!
+```
+
+(Righe di router, `nodo_llm` e revisore omesse.) Al quarto turno il primo turno non è più nella cronologia: il nome
+arriva dal riassunto.
+
+**Da provare in Docker.** La prova del riassunto in Docker non è ancora stata eseguita: il 17/11/2026 Docker Desktop
+non si avviava (`Error response from daemon: Docker Desktop is unable to start`). Il `Dockerfile` copia
+`riassunto.txt` nell'immagine. La prova da fare è la stessa sequenza della pipe, con
+`docker compose run --rm -T -e LOG_LEVEL=INFO -e RIASSUNTO_SOGLIA=4 -e RIASSUNTO_TURNI=1 assistente`, dopo
+`docker compose build`.
+
 ## Strumento orologio
 
 Per le domande su ora, data o giorno attuali il modello chiede lo strumento `ora_corrente` e il programma lo
@@ -360,8 +429,8 @@ Tu> Assistente> A New York sono le 05:47 di mercoledì 28 ottobre 2026 (ora EDT)
 Tu> Alla prossima!
 ```
 
-Il grafo ammette al massimo 20 passaggi per turno (10 per l'agente e gli strumenti, più router, revisioni e
-pulizia): se il modello continua a chiedere strumenti la chat stampa `Errore: limite di 20 passaggi raggiunto.
+Il grafo ammette al massimo 21 passaggi per turno (10 per l'agente e gli strumenti, più riassunto, router, revisioni
+e pulizia): se il modello continua a chiedere strumenti la chat stampa `Errore: limite di 21 passaggi raggiunto.
 Turno annullato.`,
 scarta il turno e prosegue.
 
@@ -743,6 +812,12 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
 
 ## Diagnosi
 
+- **Dopo un po' l'assistente dimentica qualcosa detto all'inizio** (per esempio il nome): controllare nel log la
+  riga `riassunto: N messaggi -> M`; rendere più esplicito `riassunto.txt` su che cosa conservare, oppure alzare
+  `RIASSUNTO_TURNI` o `RIASSUNTO_SOGLIA` (più turni intatti, prompt più lunghi). Un `[WARNING] riassunto: errore (...)`,
+  `riassunto: risposta vuota` o `riassunto: risposta troncata` lascia la cronologia com'era: la risposta arriva comunque. `RIASSUNTO_SOGLIA` o
+  `RIASSUNTO_TURNI` non interi o minori di 1 fermano l'avvio con `Errore: RIASSUNTO_... non è valido ...` e codice 1;
+  se manca `riassunto.txt`, `Errore: File del riassunto ... non trovato. Controllare RIASSUNTO_FILE ...`.
 - **Il revisore fa riscrivere risposte corrette** (`revisore: non coerente (...)` su risposte complete): rendere
   più permissivo `revisore.txt` oppure disattivare i giri con `REVISIONI_MAX=0`. `REVISIONI_MAX` non intero o
   negativo ferma l'avvio con `Errore: REVISIONI_MAX non è valido ...` e codice 1.

@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -9,10 +10,11 @@ import pytest
 
 from assistente.calendario import crea_strumenti_calendario, leggi_data
 from assistente.client_mcp import carica_strumenti_mcp
-from assistente.config import carica_configurazione, leggi_ambito, leggi_file_env, leggi_revisore
+from assistente.config import carica_configurazione, leggi_ambito, leggi_file_env, leggi_revisore, leggi_riassunto
 from assistente.convertitore import crea_strumento_convertitore
-from assistente.grafo import costruisci_grafo, esegui_turno
-from assistente.modello import crea_modello, crea_modello_router, leggi_modelli_disponibili, verifica_modello
+from assistente.grafo import costruisci_grafo, esegui_turno, esegui_turno_con_riassunto
+from assistente.modello import crea_modello, crea_modello_riassunto, crea_modello_router, leggi_modelli_disponibili, verifica_modello
+from assistente.riassunto import messaggi_per_il_riassunto
 from assistente.revisore import SCHEMA_REVISORE, e_indicazione, leggi_valutazione, messaggi_per_il_revisore
 from assistente.router import INIZIO_RIFIUTO
 from assistente.note import crea_strumenti_note
@@ -30,9 +32,8 @@ def config():
     return carica_configurazione({**leggi_file_env(FILE_ENV), **os.environ})
 
 
-@pytest.fixture(scope="module")
-def grafo(config, servizio_note):
-    """Grafo collegato al modello reale, con gli stessi strumenti di `main`."""
+def crea_grafo(config, servizio_note, soglia, turni):
+    """Grafo collegato al modello reale, con gli stessi strumenti e nodi di `main` e il riassunto dato."""
     verifica_modello(config.modello, leggi_modelli_disponibili(config.base_url))
     strumenti = [
         crea_strumento_orologio(config.fuso),
@@ -44,8 +45,18 @@ def grafo(config, servizio_note):
     ambito = leggi_ambito(RADICE / "ambito.txt")
     revisore = leggi_revisore(RADICE / "revisore.txt")
     return costruisci_grafo(
-        crea_modello(config), strumenti, ambito, crea_modello_router(config), revisore, config.revisioni_max
+        crea_modello(config), strumenti, ambito, crea_modello_router(config), revisore, config.revisioni_max,
+        riassunto_istruzioni=leggi_riassunto(RADICE / "riassunto.txt"),
+        riassunto_soglia=soglia,
+        riassunto_turni=turni,
+        modello_riassunto=crea_modello_riassunto(config),
     )
+
+
+@pytest.fixture(scope="module")
+def grafo(config, servizio_note):
+    """Grafo come quello di `main` (le prove brevi restano sotto la soglia del riassunto)."""
+    return crea_grafo(config, servizio_note, config.riassunto_soglia, config.riassunto_turni)
 
 
 def test_reale_risposta_ordinaria(grafo):
@@ -189,3 +200,43 @@ def test_reale_risposta_approvata(grafo, caplog):
     assert "97" in cronologia[-1].text
     assert any(m.startswith("revisore: coerente") for m in caplog.messages)
     assert not any(m.startswith("revisore: non coerente") for m in caplog.messages)
+
+
+TRASCRIZIONE_CON_NOME = (
+    "Utente: Ciao, mi chiamo Ottavio e lavoro nel laboratorio di chimica.\n"
+    "Assistente: Piacere, Ottavio! Come posso aiutarti?\n"
+    "Utente: Che ore sono?\n"
+    'Assistente chiede lo strumento ora_corrente {"fuso": "Europe/Rome"}\n'
+    "Strumento ora_corrente: 2026-11-17T15:42:10+01:00 (Europe/Rome)\n"
+    "Assistente: Sono le 15:42."
+)
+
+
+def test_reale_riassunto_conserva_il_nome(config):
+    messaggi = messaggi_per_il_riassunto(leggi_riassunto(RADICE / "riassunto.txt"), "", TRASCRIZIONE_CON_NOME)
+    testo = crea_modello_riassunto(config).invoke(messaggi).text
+    assert "Ottavio" in testo
+    assert not re.search(r"\d{1,2}:\d{2}", testo)
+
+
+def test_reale_nome_dopo_la_compressione(config, servizio_note, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    grafo = crea_grafo(config, servizio_note, soglia=4, turni=1)
+    cronologia, riassunto = [], ""
+    for domanda in ("Ciao, mi chiamo Ottavio.", "Quanto fa 12 per 7?", "Quanti centimetri sono 3 pollici?",
+                    "Come mi chiamo?"):
+        cronologia, riassunto = esegui_turno_con_riassunto(grafo, cronologia, riassunto, domanda)
+    assert any(re.match(r"riassunto: \d+ messaggi -> \d+ in ", m) for m in caplog.messages)
+    assert "Ciao, mi chiamo Ottavio." not in [m.text for m in cronologia if m.type == "human"]
+    assert "Ottavio" in cronologia[-1].text
+
+
+def test_reale_riassunto_conserva_il_nome_di_una_presentazione_breve(config):
+    # Caso della prova del 17/11/2026: con una presentazione breve gemma scriveva «si è presentato dicendo il suo
+    # nome», senza il nome.
+    trascrizione = (
+        "Utente: Ciao, mi chiamo Ottavio.\n"
+        "Assistente: Ciao Ottavio! È un piacere conoscerti. Come posso assisterti oggi nel laboratorio?"
+    )
+    messaggi = messaggi_per_il_riassunto(leggi_riassunto(RADICE / "riassunto.txt"), "", trascrizione)
+    assert "Ottavio" in crea_modello_riassunto(config).invoke(messaggi).text

@@ -5,6 +5,7 @@ from assistente.config import ErroreConfigurazione, carica_configurazione
 from assistente.modello import (
     ErroreServer,
     crea_modello,
+    crea_modello_riassunto,
     crea_modello_router,
     estrai_identificativi,
     leggi_modelli_disponibili,
@@ -57,3 +58,10 @@ def test_modello_del_router_senza_ragionamento():
     router = crea_modello_router(config)
     assert router.reasoning_effort == "none" and router.max_tokens == 80
     assert router.model_name == crea_modello(config).model_name
+
+
+def test_modello_del_riassunto_senza_ragionamento_e_con_spazio_per_il_testo():
+    config = carica_configurazione(VALIDO)
+    riassunto = crea_modello_riassunto(config)
+    assert riassunto.reasoning_effort == "none" and riassunto.max_tokens == 400
+    assert riassunto.model_name == crea_modello(config).model_name

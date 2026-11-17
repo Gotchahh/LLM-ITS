@@ -14,6 +14,7 @@ from assistente.config import (
     configura_log,
     leggi_ambito,
     leggi_revisore,
+    leggi_riassunto,
     leggi_file_env,
 )
 from assistente.convertitore import crea_strumento_convertitore
@@ -21,6 +22,7 @@ from assistente.grafo import costruisci_grafo
 from assistente.modello import (
     ErroreServer,
     crea_modello,
+    crea_modello_riassunto,
     crea_modello_router,
     leggi_modelli_disponibili,
     verifica_modello,
@@ -44,6 +46,7 @@ def main() -> int:
         configura_log(config.livello_log)
         ambito = leggi_ambito(config.ambito_file)
         revisore = leggi_revisore(config.revisore_file)
+        riassunto = leggi_riassunto(config.riassunto_file)
         verifica_modello(config.modello, leggi_modelli_disponibili(config.base_url))
         strumenti_mcp = carica_strumenti_mcp()
     except (ErroreConfigurazione, ErroreServer, ErroreMCP) as errore:
@@ -62,7 +65,11 @@ def main() -> int:
         *strumenti_mcp,
     ]
     grafo = costruisci_grafo(
-        crea_modello(config), strumenti, ambito, crea_modello_router(config), revisore, config.revisioni_max
+        crea_modello(config), strumenti, ambito, crea_modello_router(config), revisore, config.revisioni_max,
+        riassunto_istruzioni=riassunto,
+        riassunto_soglia=config.riassunto_soglia,
+        riassunto_turni=config.riassunto_turni,
+        modello_riassunto=crea_modello_riassunto(config),
     )
     esegui_chat(
         grafo,

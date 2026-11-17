@@ -22,6 +22,12 @@ VARIABILE_REVISORE = "REVISORE_FILE"
 REVISORE_PREDEFINITO = "revisore.txt"
 VARIABILE_REVISIONI = "REVISIONI_MAX"
 REVISIONI_PREDEFINITE = 2
+VARIABILE_RIASSUNTO = "RIASSUNTO_FILE"
+RIASSUNTO_PREDEFINITO = "riassunto.txt"
+VARIABILE_SOGLIA = "RIASSUNTO_SOGLIA"
+SOGLIA_PREDEFINITA = 20
+VARIABILE_TURNI = "RIASSUNTO_TURNI"
+TURNI_PREDEFINITI = 2
 
 OBBLIGATORIE = (VARIABILE_URL, VARIABILE_MODELLO, VARIABILE_FUSO)
 LIVELLI_LOG = ("DEBUG", "INFO", "WARNING", "ERROR")
@@ -44,6 +50,9 @@ class Configurazione:
     ambito_file: Path = Path(AMBITO_PREDEFINITO)
     revisore_file: Path = Path(REVISORE_PREDEFINITO)
     revisioni_max: int = REVISIONI_PREDEFINITE
+    riassunto_file: Path = Path(RIASSUNTO_PREDEFINITO)
+    riassunto_soglia: int = SOGLIA_PREDEFINITA
+    riassunto_turni: int = TURNI_PREDEFINITI
 
 
 def leggi_file_env(percorso: Path) -> dict[str, str]:
@@ -89,6 +98,21 @@ def leggi_revisore(percorso: Path) -> str:
     return _leggi_testo(percorso, "del revisore", VARIABILE_REVISORE, REVISORE_PREDEFINITO)
 
 
+def leggi_riassunto(percorso: Path) -> str:
+    """Istruzioni del riassunto della cronologia (prompt del riassunto)."""
+    return _leggi_testo(percorso, "del riassunto", VARIABILE_RIASSUNTO, RIASSUNTO_PREDEFINITO)
+
+
+def _intero_positivo(nome: str, valore: str, predefinito: int) -> int:
+    """Intero da 1 in su (valore vuoto = `predefinito`), o ErroreConfigurazione che nomina la variabile."""
+    testo = valore or str(predefinito)
+    if not testo.isdecimal() or int(testo) < 1:
+        raise ErroreConfigurazione(
+            f"{nome} non è valido: «{valore}». Serve un intero da 1 in su, per esempio {predefinito}."
+        )
+    return int(testo)
+
+
 def _indirizzo(nome: str, valore: str, esempio: str) -> str:
     """Indirizzo http(s) senza barra finale, o ErroreConfigurazione che nomina la variabile."""
     pulito = valore.rstrip("/")
@@ -109,7 +133,7 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
 
     Gli spazi ai bordi sono tolti e un valore vuoto equivale a una variabile mancante.
     """
-    valori = {nome: ambiente.get(nome, "").strip() for nome in (*OBBLIGATORIE, VARIABILE_LOG, VARIABILE_NOTE, VARIABILE_AMBITO, VARIABILE_REVISORE, VARIABILE_REVISIONI)}
+    valori = {nome: ambiente.get(nome, "").strip() for nome in (*OBBLIGATORIE, VARIABILE_LOG, VARIABILE_NOTE, VARIABILE_AMBITO, VARIABILE_REVISORE, VARIABILE_REVISIONI, VARIABILE_RIASSUNTO, VARIABILE_SOGLIA, VARIABILE_TURNI)}
 
     mancanti = [nome for nome in OBBLIGATORIE if not valori[nome]]
     if mancanti:
@@ -153,6 +177,9 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
         ambito_file=Path(valori[VARIABILE_AMBITO] or AMBITO_PREDEFINITO),
         revisore_file=Path(valori[VARIABILE_REVISORE] or REVISORE_PREDEFINITO),
         revisioni_max=revisioni_max,
+        riassunto_file=Path(valori[VARIABILE_RIASSUNTO] or RIASSUNTO_PREDEFINITO),
+        riassunto_soglia=_intero_positivo(VARIABILE_SOGLIA, valori[VARIABILE_SOGLIA], SOGLIA_PREDEFINITA),
+        riassunto_turni=_intero_positivo(VARIABILE_TURNI, valori[VARIABILE_TURNI], TURNI_PREDEFINITI),
     )
 
 

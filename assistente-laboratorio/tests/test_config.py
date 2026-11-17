@@ -11,6 +11,7 @@ from assistente.config import (
     configura_log,
     leggi_ambito,
     leggi_revisore,
+    leggi_riassunto,
     leggi_file_env,
 )
 
@@ -201,3 +202,40 @@ def test_leggi_revisore_non_valido(tmp_path, contenuto):
 
 def test_revisore_del_progetto():
     assert "coerente" in leggi_revisore(Path(__file__).resolve().parent.parent / "revisore.txt")
+
+
+def test_configurazione_del_riassunto():
+    c = carica_configurazione(VALIDO)
+    assert (c.riassunto_file, c.riassunto_soglia, c.riassunto_turni) == (Path("riassunto.txt"), 20, 2)
+    assert carica_configurazione({**VALIDO, "RIASSUNTO_FILE": " r.txt "}).riassunto_file == Path("r.txt")
+    assert carica_configurazione({**VALIDO, "RIASSUNTO_SOGLIA": " 6 "}).riassunto_soglia == 6
+    assert carica_configurazione({**VALIDO, "RIASSUNTO_TURNI": "1"}).riassunto_turni == 1
+
+
+@pytest.mark.parametrize(
+    "variabile, valore",
+    [
+        ("RIASSUNTO_SOGLIA", "0"),
+        ("RIASSUNTO_SOGLIA", "-3"),
+        ("RIASSUNTO_SOGLIA", "venti"),
+        ("RIASSUNTO_TURNI", "0"),
+        ("RIASSUNTO_TURNI", "due"),
+    ],
+)
+def test_riassunto_intero_non_valido(variabile, valore):                     # Review Focus 5
+    with pytest.raises(ErroreConfigurazione, match=variabile):
+        carica_configurazione({**VALIDO, variabile: valore})
+
+
+@pytest.mark.parametrize("contenuto", [None, "  \n"])
+def test_leggi_riassunto_non_valido(tmp_path, contenuto):
+    percorso = tmp_path / "riassunto.txt"
+    if contenuto is not None:
+        percorso.write_text(contenuto, encoding="utf-8")
+    with pytest.raises(ErroreConfigurazione) as errore:
+        leggi_riassunto(percorso)
+    assert "RIASSUNTO_FILE" in str(errore.value) and "riassunto" in str(errore.value)
+
+
+def test_riassunto_del_progetto():
+    assert "nome" in leggi_riassunto(Path(__file__).resolve().parent.parent / "riassunto.txt")
