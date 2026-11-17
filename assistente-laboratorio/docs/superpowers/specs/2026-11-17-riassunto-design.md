@@ -11,7 +11,7 @@ le informazioni importanti (per esempio il nome dell'utente detto al primo turno
 Lezione 6; l'utente ha chiesto di partire direttamente dalle slide, quindi le decisioni sotto sono dell'assistente
 salvo dove indicato.
 
-## Modifiche dopo le prove reali (17/11/2026, da confermare dall'utente)
+## Modifiche dopo le prove reali (17/11/2026, confermate dall'utente lo stesso giorno)
 Le prove con gemma hanno portato a tre scostamenti da quanto approvato; le parti sotto restano come approvate:
 1. **Come l'agente riceve il riassunto**: non in coda al prompt di sistema ma come primo messaggio della conversazione
    (un messaggio dell'utente subito dopo il prompt di sistema, solo nella chiamata, non nella cronologia). Con tutti gli
