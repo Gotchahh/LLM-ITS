@@ -538,7 +538,11 @@ def test_riassunto_sopra_la_soglia(caplog):
     assert [m.text for m in nuova] == ["D4", "R4", "D5", "R5"]
     assert testo == "L'utente ha fatto tre domande."
     assert any(m.startswith("riassunto: 9 messaggi -> 3 in ") for m in caplog.messages)
-    assert "L'utente ha fatto tre domande." in agente.chiamate[0][0].text      # il prompt dell'agente
+    # Il riassunto arriva all'agente in un secondo messaggio di sistema, dopo il prompt invariato: con tutti gli
+    # strumenti gemma lo ignorava dentro il prompt (prova del 17/11/2026).
+    sistema_agente, riassunto_agente = agente.chiamate[0][:2]
+    assert sistema_agente.text == PROMPT_DI_SISTEMA
+    assert riassunto_agente.type == "system" and riassunto_agente.text.endswith("L'utente ha fatto tre domande.")
 
 
 def test_riassunto_sostituisce_il_precedente():                               # Review Focus 2
@@ -600,7 +604,7 @@ def test_agente_e_router_ricevono_il_riassunto_il_revisore_no():
     esegui_turno_con_riassunto(
         grafo_con_riassunto(agente, ausiliario, ambito=AMBITO, revisore=REVISORE),
         [], "Si chiama Ottavio.", "Come mi chiamo?")
-    assert "Ottavio" in agente.chiamate[0][0].text
+    assert agente.chiamate[0][0].text == PROMPT_DI_SISTEMA and "Ottavio" in agente.chiamate[0][1].text
     assert AMBITO in ausiliario.chiamate_router[0][0].text and "Ottavio" in ausiliario.chiamate_router[0][0].text
     assert not any("Si chiama Ottavio." in m.text for m in ausiliario.chiamate_revisore[0])
 
@@ -637,3 +641,9 @@ def test_modello_riassunto_separato_dal_router():
                          riassunto_soglia=6, riassunto_turni=1, modello_riassunto=riassunto),
         turni_precedenti(4), "", "D5")
     assert testo == "Riassunto" and len(riassunto.chiamate) == 1 and router.chiamate == []
+
+
+def test_senza_riassunto_un_solo_messaggio_di_sistema_all_agente():
+    agente = ModelloFinto([AIMessage("R1")])
+    esegui_turno_con_riassunto(grafo_con_riassunto(agente, ModelloFinto([])), [], "", "D1")
+    assert [m.type for m in agente.chiamate[0]] == ["system", "human"]

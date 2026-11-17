@@ -47,8 +47,19 @@ def messaggi_per_il_riassunto(istruzioni: str, precedente: str, trascrizione: st
     ]
 
 
+def messaggi_di_sistema(prompt: str, riassunto: str) -> list[SystemMessage]:
+    """Il prompt di sistema e, se c'è, il riassunto in un secondo messaggio di sistema.
+
+    Per l'agente: con tutti gli strumenti associati gemma ignorava il riassunto dentro il prompt (in coda o in testa)
+    e lo usava in un messaggio separato (prova del 17/11/2026).
+    """
+    if not riassunto:
+        return [SystemMessage(prompt)]
+    return [SystemMessage(prompt), SystemMessage(f"{INTRODUZIONE_RIASSUNTO}\n{riassunto}")]
+
+
 def con_riassunto(prompt: str, riassunto: str) -> str:
-    """Il prompt di sistema con il riassunto in coda; invariato se non c'è riassunto."""
+    """Il prompt di sistema con il riassunto in coda (per il router, che ha un prompt breve); invariato se non c'è."""
     if not riassunto:
         return prompt
     return f"{prompt}\n\n{INTRODUZIONE_RIASSUNTO}\n{riassunto}"

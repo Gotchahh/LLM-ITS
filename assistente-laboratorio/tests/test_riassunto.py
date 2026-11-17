@@ -1,6 +1,12 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from assistente.riassunto import con_riassunto, messaggi_per_il_riassunto, punto_di_taglio, trascrivi
+from assistente.riassunto import (
+    con_riassunto,
+    messaggi_di_sistema,
+    messaggi_per_il_riassunto,
+    punto_di_taglio,
+    trascrivi,
+)
 
 
 def turno(n):
@@ -64,3 +70,9 @@ def test_con_riassunto():
     assert con_riassunto("P", "") == "P"
     testo = con_riassunto("P", "R")
     assert testo.startswith("P\n\n") and testo.endswith("R")
+
+
+def test_messaggi_di_sistema():
+    assert [m.text for m in messaggi_di_sistema("P", "")] == ["P"]
+    prompt, riassunto = messaggi_di_sistema("P", "R")
+    assert prompt.text == "P" and riassunto.type == "system" and riassunto.text.endswith("R")

@@ -25,7 +25,13 @@ from assistente.revisore import (
     messaggi_per_il_revisore,
     ultima_domanda,
 )
-from assistente.riassunto import con_riassunto, messaggi_per_il_riassunto, punto_di_taglio, trascrivi
+from assistente.riassunto import (
+    con_riassunto,
+    messaggi_di_sistema,
+    messaggi_per_il_riassunto,
+    punto_di_taglio,
+    trascrivi,
+)
 from assistente.router import SCHEMA_ROUTER, leggi_decisione, messaggi_per_il_router, testo_rifiuto
 
 logger = logging.getLogger(__name__)
@@ -128,8 +134,8 @@ def costruisci_grafo(
     indicazioni e il turno finisce. Il revisore usa lo stesso modello del router.
     Con `riassunto_istruzioni` il grafo parte da nodo_riassunto: oltre `riassunto_soglia` messaggi sostituisce i
     turni più vecchi con un riassunto, lasciando intatti gli ultimi `riassunto_turni` turni e la domanda in corso;
-    usa `modello_riassunto` (predefinito: il modello del router), senza strumenti. Agente e router ricevono il
-    riassunto nel prompt di sistema.
+    usa `modello_riassunto` (predefinito: il modello del router), senza strumenti. L'agente riceve il riassunto in un
+    secondo messaggio di sistema, il router in coda al suo prompt.
     Gli strumenti vengono associati al modello una volta sola, e solo se l'elenco non è vuoto:
     un elenco `tools` vuoto può essere rifiutato dall'API.
     """
@@ -147,8 +153,8 @@ def costruisci_grafo(
     per_nome = {strumento.name: strumento for strumento in strumenti}
 
     def nodo_llm(stato: Stato) -> dict:
-        """Interroga il modello con il prompt di sistema (non salvato) e la cronologia."""
-        messaggi = [SystemMessage(con_riassunto(PROMPT_DI_SISTEMA, stato.get("riassunto", ""))), *stato["messages"]]
+        """Interroga il modello con il prompt di sistema e l'eventuale riassunto (non salvati) e la cronologia."""
+        messaggi = [*messaggi_di_sistema(PROMPT_DI_SISTEMA, stato.get("riassunto", "")), *stato["messages"]]
         logger.info("nodo_llm: chiamata al modello (%d messaggi)", len(messaggi))
         inizio = time.perf_counter()
         risposta = modello.invoke(messaggi)

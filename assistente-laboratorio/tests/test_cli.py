@@ -265,7 +265,7 @@ def test_chat_passa_il_riassunto_al_turno_successivo():
     chat(grafo_con_riassunto(agente, riassunto), ["D1", "D2", "D3", "D4"])
     assert len(riassunto.chiamate) == 2                   # al terzo e al quarto turno
     assert "RIASSUNTO-1" in riassunto.chiamate[1][1].text   # il secondo riceve il primo come precedente
-    assert "RIASSUNTO-2" in agente.chiamate[3][0].text      # l'agente del quarto turno riceve l'ultimo
+    assert "RIASSUNTO-2" in agente.chiamate[3][1].text      # l'agente del quarto turno riceve l'ultimo
 
 
 def test_turno_fallito_conserva_cronologia_e_riassunto():               # Review Focus 1
@@ -276,4 +276,4 @@ def test_turno_fallito_conserva_cronologia_e_riassunto():               # Review
     secondo = riassunto.chiamate[1][1].text
     assert "nessuno" in secondo and "RIASSUNTO-SCARTATO" not in secondo
     assert "Utente: D1" in secondo                          # di nuovo da riassumere: la compressione fallita è scartata
-    assert "RIASSUNTO-BUONO" in agente.chiamate[3][0].text
+    assert "RIASSUNTO-BUONO" in agente.chiamate[3][1].text
