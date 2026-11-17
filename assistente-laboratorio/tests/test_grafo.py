@@ -538,11 +538,13 @@ def test_riassunto_sopra_la_soglia(caplog):
     assert [m.text for m in nuova] == ["D4", "R4", "D5", "R5"]
     assert testo == "L'utente ha fatto tre domande."
     assert any(m.startswith("riassunto: 9 messaggi -> 3 in ") for m in caplog.messages)
-    # Il riassunto arriva all'agente in un secondo messaggio di sistema, dopo il prompt invariato: con tutti gli
-    # strumenti gemma lo ignorava dentro il prompt (prova del 17/11/2026).
+    # Il riassunto arriva all'agente in un messaggio dopo il prompt invariato e prima della cronologia: con tutti gli
+    # strumenti gemma lo ignorava dentro il prompt e, in un secondo messaggio di sistema, smetteva di chiamare gli
+    # strumenti (prove del 17/11/2026).
     sistema_agente, riassunto_agente = agente.chiamate[0][:2]
     assert sistema_agente.text == PROMPT_DI_SISTEMA
-    assert riassunto_agente.type == "system" and riassunto_agente.text.endswith("L'utente ha fatto tre domande.")
+    assert riassunto_agente.type == "human" and riassunto_agente.text.endswith("L'utente ha fatto tre domande.")
+    assert [m.text for m in agente.chiamate[0][2:]] == ["D4", "R4", "D5"]
 
 
 def test_riassunto_sostituisce_il_precedente():                               # Review Focus 2

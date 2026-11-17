@@ -2,7 +2,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from assistente.riassunto import (
     con_riassunto,
-    messaggi_di_sistema,
+    messaggi_di_contesto,
     messaggi_per_il_riassunto,
     punto_di_taglio,
     trascrivi,
@@ -72,7 +72,8 @@ def test_con_riassunto():
     assert testo.startswith("P\n\n") and testo.endswith("R")
 
 
-def test_messaggi_di_sistema():
-    assert [m.text for m in messaggi_di_sistema("P", "")] == ["P"]
-    prompt, riassunto = messaggi_di_sistema("P", "R")
-    assert prompt.text == "P" and riassunto.type == "system" and riassunto.text.endswith("R")
+def test_messaggi_di_contesto():
+    assert [(m.type, m.text) for m in messaggi_di_contesto("P", "")] == [("system", "P")]
+    prompt, riassunto = messaggi_di_contesto("P", "R")
+    assert (prompt.type, prompt.text) == ("system", "P")
+    assert riassunto.type == "human" and riassunto.text.endswith("R")

@@ -27,7 +27,7 @@ from assistente.revisore import (
 )
 from assistente.riassunto import (
     con_riassunto,
-    messaggi_di_sistema,
+    messaggi_di_contesto,
     messaggi_per_il_riassunto,
     punto_di_taglio,
     trascrivi,
@@ -135,7 +135,7 @@ def costruisci_grafo(
     Con `riassunto_istruzioni` il grafo parte da nodo_riassunto: oltre `riassunto_soglia` messaggi sostituisce i
     turni più vecchi con un riassunto, lasciando intatti gli ultimi `riassunto_turni` turni e la domanda in corso;
     usa `modello_riassunto` (predefinito: il modello del router), senza strumenti. L'agente riceve il riassunto in un
-    secondo messaggio di sistema, il router in coda al suo prompt.
+    messaggio prima della cronologia, il router in coda al suo prompt.
     Gli strumenti vengono associati al modello una volta sola, e solo se l'elenco non è vuoto:
     un elenco `tools` vuoto può essere rifiutato dall'API.
     """
@@ -154,7 +154,7 @@ def costruisci_grafo(
 
     def nodo_llm(stato: Stato) -> dict:
         """Interroga il modello con il prompt di sistema e l'eventuale riassunto (non salvati) e la cronologia."""
-        messaggi = [*messaggi_di_sistema(PROMPT_DI_SISTEMA, stato.get("riassunto", "")), *stato["messages"]]
+        messaggi = [*messaggi_di_contesto(PROMPT_DI_SISTEMA, stato.get("riassunto", "")), *stato["messages"]]
         logger.info("nodo_llm: chiamata al modello (%d messaggi)", len(messaggi))
         inizio = time.perf_counter()
         risposta = modello.invoke(messaggi)

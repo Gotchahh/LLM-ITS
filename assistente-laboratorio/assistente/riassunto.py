@@ -47,15 +47,16 @@ def messaggi_per_il_riassunto(istruzioni: str, precedente: str, trascrizione: st
     ]
 
 
-def messaggi_di_sistema(prompt: str, riassunto: str) -> list[SystemMessage]:
-    """Il prompt di sistema e, se c'è, il riassunto in un secondo messaggio di sistema.
+def messaggi_di_contesto(prompt: str, riassunto: str) -> list[AnyMessage]:
+    """Il prompt di sistema e, se c'è, il riassunto in un messaggio che precede la cronologia (solo per la chiamata).
 
-    Per l'agente: con tutti gli strumenti associati gemma ignorava il riassunto dentro il prompt (in coda o in testa)
-    e lo usava in un messaggio separato (prova del 17/11/2026).
+    Per l'agente, con tutti gli strumenti associati (prove del 17/11/2026): dentro il prompt di sistema gemma ignorava
+    il riassunto; in un secondo messaggio di sistema smetteva di chiamare gli strumenti (risposta vuota); come primo
+    messaggio della conversazione lo usava e chiamava gli strumenti.
     """
     if not riassunto:
         return [SystemMessage(prompt)]
-    return [SystemMessage(prompt), SystemMessage(f"{INTRODUZIONE_RIASSUNTO}\n{riassunto}")]
+    return [SystemMessage(prompt), HumanMessage(f"{INTRODUZIONE_RIASSUNTO}\n{riassunto}")]
 
 
 def con_riassunto(prompt: str, riassunto: str) -> str:
