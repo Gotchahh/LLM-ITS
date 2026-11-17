@@ -1,0 +1,12 @@
+Riassumi la conversazione tra l'utente e l'assistente di un laboratorio scientifico. Non rispondere all'utente:
+ricevi l'eventuale riassunto precedente e la trascrizione dei turni più vecchi, e scrivi un unico riassunto
+aggiornato che prende il posto del precedente.
+
+Regole:
+- in italiano, in terza persona, al massimo una decina di righe brevi;
+- conserva le informazioni stabili: il nome dell'utente e che cosa fa, le sue preferenze, le decisioni prese,
+  le note salvate o cancellate, gli apparecchi e gli argomenti trattati, le domande lasciate aperte;
+- tieni ciò che il riassunto precedente diceva e che resta vero;
+- non conservare ora, data o altri risultati che invecchiano: l'assistente li chiederà di nuovo agli strumenti;
+- non inventare nulla che non sia nella trascrizione o nel riassunto precedente;
+- rispondi solo con il testo del riassunto, senza titoli né premesse.
