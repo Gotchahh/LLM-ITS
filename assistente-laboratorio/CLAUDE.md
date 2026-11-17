@@ -69,7 +69,7 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   librerie MCP resta confinata nel modulo client MCP.
 - LM Studio sull'host, raggiunto tramite la sua API compatibile con OpenAI.
 - Indirizzo del server e identificativo del modello solo da variabili d'ambiente
-  (`LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`; inoltre `APP_TIMEZONE`, `LOG_LEVEL`, `NOTE_API_URL`, `AMBITO_FILE`, `REVISORE_FILE` e `REVISIONI_MAX`).
+  (`LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`; inoltre `APP_TIMEZONE`, `LOG_LEVEL`, `NOTE_API_URL`, `AMBITO_FILE`, `REVISORE_FILE`, `REVISIONI_MAX`, `RIASSUNTO_FILE`, `RIASSUNTO_SOGLIA` e `RIASSUNTO_TURNI`).
   L'identificativo è quello restituito dal server (`GET /v1/models`), mai inventato.
 - Un file di configurazione di esempio senza credenziali; il file reale (`.env`) resta fuori da Git.
 - Docker Compose per l'applicazione; LM Studio non va containerizzato. Dallo step 9 della Lezione 6 un
