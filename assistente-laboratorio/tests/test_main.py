@@ -17,6 +17,7 @@ def ambito_del_progetto(monkeypatch):
     """I test di `main` girano anche in cartelle temporanee: l'ambito è quello del progetto."""
     monkeypatch.setenv("AMBITO_FILE", str(Path(__file__).resolve().parent.parent / "ambito.txt"))
     monkeypatch.setenv("REVISORE_FILE", str(Path(__file__).resolve().parent.parent / "revisore.txt"))
+    monkeypatch.setenv("RIASSUNTO_FILE", str(Path(__file__).resolve().parent.parent / "riassunto.txt"))
 
 
 @pytest.fixture(autouse=True)
@@ -56,7 +57,7 @@ def test_main_prepara_i_flussi_non_interattivi_prima_della_chat(monkeypatch):
         monkeypatch.setenv(nome, valore)
     monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
     monkeypatch.setattr(avvio, "crea_modello", lambda config: object())
-    monkeypatch.setattr(avvio, "costruisci_grafo", lambda *argomenti: "grafo")
+    monkeypatch.setattr(avvio, "costruisci_grafo", lambda *argomenti, **opzioni: "grafo")
     ricevuto = []
 
     def chat_finta(grafo, server, **opzioni):
@@ -142,7 +143,7 @@ def test_main_passa_al_grafo_l_orologio_e_gli_strumenti_mcp(monkeypatch):
     monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [calcola_finta])
     ricevuti = []
     monkeypatch.setattr(avvio, "costruisci_grafo",
-                        lambda modello, strumenti, *altri: ricevuti.append(strumenti) or "grafo")
+                        lambda modello, strumenti, *altri, **opzioni: ricevuti.append(strumenti) or "grafo")
     monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: None)
     assert avvio.main() == 0
     assert [s.name for s in ricevuti[0]] == [
@@ -158,7 +159,7 @@ def test_main_con_servizio_note_spento_avvisa_e_parte(monkeypatch, caplog):
     monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
     monkeypatch.setattr(avvio, "crea_modello", lambda config: object())
     monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
-    monkeypatch.setattr(avvio, "costruisci_grafo", lambda *argomenti: "grafo")
+    monkeypatch.setattr(avvio, "costruisci_grafo", lambda *argomenti, **opzioni: "grafo")
     avviata = []
     monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: avviata.append(True))
     monkeypatch.setattr(avvio, "servizio_raggiungibile", lambda url: False)
@@ -177,13 +178,15 @@ def test_main_passa_al_grafo_l_ambito_e_il_modello_del_router(monkeypatch):
     monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
     ricevuti = []
     monkeypatch.setattr(avvio, "costruisci_grafo",
-                        lambda modello, strumenti, ambito, router, revisore, revisioni:
-                        ricevuti.append((modello, ambito, router, revisore, revisioni)) or "grafo")
+                        lambda modello, strumenti, ambito, router, revisore, revisioni, **riassunto:
+                        ricevuti.append((modello, ambito, router, revisore, revisioni, riassunto)) or "grafo")
     monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: None)
     assert avvio.main() == 0
-    modello, ambito, router, revisore, revisioni = ricevuti[0]
+    modello, ambito, router, revisore, revisioni, riassunto = ricevuti[0]
     assert (modello, router, revisioni) == ("agente", "router", 2) and "laboratorio" in ambito
     assert "coerente" in revisore
+    assert "nome" in riassunto["riassunto_istruzioni"]
+    assert (riassunto["riassunto_soglia"], riassunto["riassunto_turni"]) == (20, 2)
 
 
 def test_main_ambito_mancante_uscita_1(monkeypatch, tmp_path):
@@ -202,3 +205,20 @@ def test_main_revisioni_max_non_valido_uscita_1(monkeypatch):
     monkeypatch.setenv("REVISIONI_MAX", "due")
     codice, errori = esegui_main_con_errore(monkeypatch)
     assert codice == 1 and errori.startswith("Errore: REVISIONI_MAX") and "Traceback" not in errori
+
+
+def test_main_riassunto_mancante_uscita_1(monkeypatch, tmp_path):
+    for nome, valore in VALIDO.items():
+        monkeypatch.setenv(nome, valore)
+    monkeypatch.setenv("RIASSUNTO_FILE", str(tmp_path / "manca.txt"))
+    monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
+    codice, errori = esegui_main_con_errore(monkeypatch)
+    assert codice == 1 and errori.startswith("Errore: ") and "RIASSUNTO_FILE" in errori and "Traceback" not in errori
+
+
+def test_main_riassunto_soglia_non_valida_uscita_1(monkeypatch):
+    for nome, valore in VALIDO.items():
+        monkeypatch.setenv(nome, valore)
+    monkeypatch.setenv("RIASSUNTO_SOGLIA", "0")
+    codice, errori = esegui_main_con_errore(monkeypatch)
+    assert codice == 1 and errori.startswith("Errore: RIASSUNTO_SOGLIA") and "Traceback" not in errori

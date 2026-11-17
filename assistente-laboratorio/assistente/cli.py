@@ -5,7 +5,7 @@ import logging
 from langgraph.errors import GraphRecursionError
 
 from assistente.config import LIVELLO_LOG_PREDEFINITO, ModalitaLog
-from assistente.grafo import LIMITE_PASSAGGI, RispostaNonValida, esegui_turno
+from assistente.grafo import LIMITE_PASSAGGI, RispostaNonValida, esegui_turno_con_riassunto
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +63,16 @@ def esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None,
                 livello_log: str = LIVELLO_LOG_PREDEFINITO) -> None:
     """Legge le righe dell'utente, esegue un turno del grafo per ciascuna e stampa la risposta.
 
-    La cronologia vive solo in questa funzione, per la durata della sessione. Un turno fallito
-    stampa un errore e viene scartato: la cronologia resta com'era e la chat prosegue.
+    La cronologia e il riassunto dei turni più vecchi vivono solo in questa funzione, per la durata della
+    sessione. Un turno fallito stampa un errore e viene scartato: cronologia e riassunto restano com'erano e la
+    chat prosegue.
     `/log` alterna log visibili e nascosti, a partire dalla modalità di `livello_log`.
     Con un indicatore `attesa` e i log nascosti, la scritta compare durante il turno e sparisce
     prima di ogni stampa successiva (risposta, errore o saluto dopo Ctrl+C).
     Termina con `/esci`, a fine input o con Ctrl+C.
     """
     cronologia = []
+    riassunto = ""
     modalita_log = ModalitaLog(livello_log)
     try:
         while True:
@@ -94,7 +96,7 @@ def esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None,
                 if usa_attesa:
                     attesa.mostra()
                 try:
-                    cronologia = esegui_turno(grafo, cronologia, riga)
+                    cronologia, riassunto = esegui_turno_con_riassunto(grafo, cronologia, riassunto, riga)
                 finally:
                     if usa_attesa:
                         attesa.nascondi()

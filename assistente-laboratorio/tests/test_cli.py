@@ -251,3 +251,29 @@ def test_attesa_sparisce_dopo_log_che_mostra():
     uscita = chat(costruisci_grafo(finto, []), ["D1", "/log", "D2"], con_attesa=True, livello_log="WARNING")
     assert uscita == ["[mostra]", "[nascondi]", "Assistente> R1", VISIBILI, "Assistente> R2",
                       "Alla prossima!"]
+
+
+def grafo_con_riassunto(agente, riassunto):
+    """Grafo che riassume oltre 2 messaggi, conservando un solo turno precedente."""
+    return costruisci_grafo(agente, [], modello_router=riassunto, riassunto_istruzioni="RIASSUMI",
+                            riassunto_soglia=2, riassunto_turni=1)
+
+
+def test_chat_passa_il_riassunto_al_turno_successivo():
+    agente = ModelloFinto([AIMessage(f"R{i}") for i in range(1, 5)])
+    riassunto = ModelloFinto([AIMessage("RIASSUNTO-1"), AIMessage("RIASSUNTO-2")])
+    chat(grafo_con_riassunto(agente, riassunto), ["D1", "D2", "D3", "D4"])
+    assert len(riassunto.chiamate) == 2                   # al terzo e al quarto turno
+    assert "RIASSUNTO-1" in riassunto.chiamate[1][1].text   # il secondo riceve il primo come precedente
+    assert "RIASSUNTO-2" in agente.chiamate[3][0].text      # l'agente del quarto turno riceve l'ultimo
+
+
+def test_turno_fallito_conserva_cronologia_e_riassunto():               # Review Focus 1
+    agente = ModelloFinto([AIMessage("R1"), AIMessage("R2"), RuntimeError("giù"), AIMessage("R3")])
+    riassunto = ModelloFinto([AIMessage("RIASSUNTO-SCARTATO"), AIMessage("RIASSUNTO-BUONO")])
+    uscita = chat(grafo_con_riassunto(agente, riassunto), ["D1", "D2", "D3", "D3 di nuovo"])
+    assert any(riga.startswith("Errore: ") for riga in uscita)
+    secondo = riassunto.chiamate[1][1].text
+    assert "nessuno" in secondo and "RIASSUNTO-SCARTATO" not in secondo
+    assert "Utente: D1" in secondo                          # di nuovo da riassumere: la compressione fallita è scartata
+    assert "RIASSUNTO-BUONO" in agente.chiamate[3][0].text
