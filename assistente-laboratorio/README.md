@@ -372,6 +372,12 @@ Tu> Alla prossima!
 (Righe di router, `nodo_llm` e revisore omesse.) Al quarto turno il primo turno non è più nella cronologia: il nome
 arriva dal riassunto.
 
+**Da provare in Docker.** La prova del riassunto in Docker non è ancora stata eseguita: il 17/11/2026 Docker Desktop
+non si avviava (`Error response from daemon: Docker Desktop is unable to start`). Il `Dockerfile` copia
+`riassunto.txt` nell'immagine. La prova da fare è la stessa sequenza della pipe, con
+`docker compose run --rm -T -e LOG_LEVEL=INFO -e RIASSUNTO_SOGLIA=4 -e RIASSUNTO_TURNI=1 assistente`, dopo
+`docker compose build`.
+
 ## Strumento orologio
 
 Per le domande su ora, data o giorno attuali il modello chiede lo strumento `ora_corrente` e il programma lo
