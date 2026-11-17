@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from conftest import ModelloFinto, chat, decisione, porta_libera, valutazione
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import StructuredTool, ToolException, tool
 from langgraph.errors import GraphRecursionError
 
@@ -14,6 +14,7 @@ from assistente.grafo import (
     RispostaNonValida,
     costruisci_grafo,
     esegui_turno,
+    esegui_turno_con_riassunto,
 )
 from assistente.calendario import crea_strumenti_calendario
 from assistente.convertitore import crea_strumento_convertitore
@@ -115,7 +116,7 @@ def test_il_turno_e_invocato_con_il_limite_di_passaggi():
 
     spia = GrafoSpia()
     esegui_turno(spia, [], "ciao")
-    assert LIMITE_PASSAGGI == 20 and spia.config == {"recursion_limit": LIMITE_PASSAGGI}
+    assert LIMITE_PASSAGGI == 21 and spia.config == {"recursion_limit": LIMITE_PASSAGGI}
 
 
 def test_percorso_con_strumento(caplog):
@@ -498,3 +499,131 @@ def test_senza_revisore_nessuna_revisione():
     finto = ModelloFinto([AIMessage("Ciao!")])
     esegui_turno(costruisci_grafo(finto, []), [], "ciao")
     assert finto.chiamate_revisore == []
+
+
+RIASSUMI = "RIASSUMI"
+
+
+def turni_precedenti(n):
+    """`n` turni semplici già conclusi: D1, R1, D2, R2, ..."""
+    return [m for i in range(1, n + 1) for m in (HumanMessage(f"D{i}"), AIMessage(f"R{i}"))]
+
+
+def grafo_con_riassunto(agente, riassunto, strumenti=(), soglia=20, turni=2, **altri):
+    return costruisci_grafo(agente, list(strumenti), modello_router=riassunto, riassunto_istruzioni=RIASSUMI,
+                            riassunto_soglia=soglia, riassunto_turni=turni, **altri)
+
+
+def test_riassunto_sotto_la_soglia_non_chiama_il_modello(caplog):
+    caplog.set_level(logging.DEBUG, logger="assistente")
+    riassunto = ModelloFinto([])
+    vecchia = turni_precedenti(3)
+    nuova, testo = esegui_turno_con_riassunto(
+        grafo_con_riassunto(ModelloFinto([AIMessage("R4")]), riassunto), vecchia, "", "D4")
+    assert riassunto.chiamate == [] and testo == ""
+    assert [m.text for m in nuova] == ["D1", "R1", "D2", "R2", "D3", "R3", "D4", "R4"]
+    assert "riassunto: 7 messaggi, sotto la soglia di 20" in caplog.messages
+
+
+def test_riassunto_sopra_la_soglia(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    riassunto = ModelloFinto([AIMessage("  L'utente ha fatto tre domande.  ")])
+    agente = ModelloFinto([AIMessage("R5")])
+    nuova, testo = esegui_turno_con_riassunto(
+        grafo_con_riassunto(agente, riassunto, soglia=6, turni=1), turni_precedenti(4), "", "D5")
+    assert len(riassunto.chiamate) == 1
+    sistema, richiesta = riassunto.chiamate[0]
+    assert sistema.text == RIASSUMI
+    assert "Utente: D3" in richiesta.text and "Assistente: R3" in richiesta.text and "D4" not in richiesta.text
+    assert [m.text for m in nuova] == ["D4", "R4", "D5", "R5"]
+    assert testo == "L'utente ha fatto tre domande."
+    assert any(m.startswith("riassunto: 9 messaggi -> 3 in ") for m in caplog.messages)
+    assert "L'utente ha fatto tre domande." in agente.chiamate[0][0].text      # il prompt dell'agente
+
+
+def test_riassunto_sostituisce_il_precedente():                               # Review Focus 2
+    riassunto = ModelloFinto([AIMessage("Si chiama Ottavio; ha chiesto l'ora.")])
+    _, testo = esegui_turno_con_riassunto(
+        grafo_con_riassunto(ModelloFinto([AIMessage("R5")]), riassunto, soglia=6, turni=1),
+        turni_precedenti(4), "Si chiama Ottavio.", "D5")
+    assert "Si chiama Ottavio." in riassunto.chiamate[0][1].text
+    assert testo == "Si chiama Ottavio; ha chiesto l'ora."
+
+
+def turno_con_strumento(n):
+    return [
+        HumanMessage(f"D{n}"),
+        AIMessage("", tool_calls=[{"name": "ora_corrente", "args": {}, "id": f"t{n}"}]),
+        ToolMessage("16:42", tool_call_id=f"t{n}", name="ora_corrente"),
+        AIMessage(f"R{n}"),
+    ]
+
+
+def test_riassunto_con_strumenti_non_lascia_orfani():                          # Review Focus 4
+    vecchia = [*turno_con_strumento(1), *turno_con_strumento(2), *turno_con_strumento(3)]
+    agente = ModelloFinto([chiamata("t4"), AIMessage("R4")])
+    nuova, _ = esegui_turno_con_riassunto(
+        grafo_con_riassunto(agente, ModelloFinto([AIMessage("Riassunto")]), [orologio], soglia=6, turni=1),
+        vecchia, "", "D4")
+    assert [m.text for m in nuova if m.type == "human"] == ["D3", "D4"]
+    richieste = {c["id"] for m in nuova if m.type == "ai" for c in m.tool_calls}
+    risposte = {m.tool_call_id for m in nuova if m.type == "tool"}
+    assert richieste == risposte == {"t3", "t4"}
+
+
+def test_riassunto_sopra_la_soglia_senza_turni_da_tagliare(caplog):
+    caplog.set_level(logging.DEBUG, logger="assistente")
+    riassunto = ModelloFinto([])
+    esegui_turno_con_riassunto(
+        grafo_con_riassunto(ModelloFinto([AIMessage("R2")]), riassunto, soglia=2, turni=2),
+        turno_con_strumento(1), "", "D2")
+    assert riassunto.chiamate == []
+    assert "riassunto: 5 messaggi, nessun turno da riassumere" in caplog.messages
+
+
+@pytest.mark.parametrize("voce, avviso", [
+    (RuntimeError("giù"), "riassunto: errore (RuntimeError), cronologia invariata"),
+    (AIMessage("  "), "riassunto: risposta vuota, cronologia invariata"),
+])
+def test_riassunto_errore_o_vuoto_lascia_tutto_invariato(caplog, voce, avviso):
+    nuova, testo = esegui_turno_con_riassunto(
+        grafo_con_riassunto(ModelloFinto([AIMessage("R5")]), ModelloFinto([voce]), soglia=6, turni=1),
+        turni_precedenti(4), "Precedente.", "D5")
+    assert len(nuova) == 10 and nuova[-1].text == "R5" and testo == "Precedente."
+    assert avviso in [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+
+def test_agente_e_router_ricevono_il_riassunto_il_revisore_no():
+    ausiliario = ModelloFinto([], decisioni=[decisione("conversazione", "nome")],
+                              valutazioni=[valutazione(True, "ok")])
+    agente = ModelloFinto([AIMessage("Ti chiami Ottavio.")])
+    esegui_turno_con_riassunto(
+        grafo_con_riassunto(agente, ausiliario, ambito=AMBITO, revisore=REVISORE),
+        [], "Si chiama Ottavio.", "Come mi chiamo?")
+    assert "Ottavio" in agente.chiamate[0][0].text
+    assert AMBITO in ausiliario.chiamate_router[0][0].text and "Ottavio" in ausiliario.chiamate_router[0][0].text
+    assert not any("Si chiama Ottavio." in m.text for m in ausiliario.chiamate_revisore[0])
+
+
+def test_turno_rifiutato_viene_riassunto():                                    # Review Focus 3
+    ausiliario = ModelloFinto([AIMessage("Ha chiesto una poesia, rifiutata.")],
+                              decisioni=[decisione("fuori_ambito", "poesia"), decisione("conversazione", "ok"),
+                                         decisione("conversazione", "ok")])
+    agente = ModelloFinto([AIMessage("R2"), AIMessage("R3")])
+    grafo = grafo_con_riassunto(agente, ausiliario, soglia=4, turni=1, ambito=AMBITO)
+    cronologia, testo = esegui_turno_con_riassunto(grafo, [], "", "una poesia")
+    cronologia, testo = esegui_turno_con_riassunto(grafo, cronologia, testo, "D2")
+    cronologia, testo = esegui_turno_con_riassunto(grafo, cronologia, testo, "D3")
+    assert "Utente: una poesia" in ausiliario.chiamate[0][1].text
+    assert [m.text for m in cronologia] == ["D2", "R2", "D3", "R3"]
+    assert testo == "Ha chiesto una poesia, rifiutata."
+
+
+def test_senza_istruzioni_nessun_nodo_riassunto():
+    assert "nodo_riassunto" not in costruisci_grafo(ModelloFinto([]), []).get_graph().nodes
+    assert "nodo_riassunto" in grafo_con_riassunto(ModelloFinto([]), ModelloFinto([])).get_graph().nodes
+
+
+def test_esegui_turno_resta_compatibile():
+    nuova = esegui_turno(grafo_con_riassunto(ModelloFinto([AIMessage("R1")]), ModelloFinto([])), [], "D1")
+    assert [m.text for m in nuova] == ["D1", "R1"]

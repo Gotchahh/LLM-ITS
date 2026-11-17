@@ -25,11 +25,12 @@ from assistente.revisore import (
     messaggi_per_il_revisore,
     ultima_domanda,
 )
+from assistente.riassunto import con_riassunto, messaggi_per_il_riassunto, punto_di_taglio, trascrivi
 from assistente.router import SCHEMA_ROUTER, leggi_decisione, messaggi_per_il_router, testo_rifiuto
 
 logger = logging.getLogger(__name__)
 
-LIMITE_PASSAGGI = 20  # 10 per l'agente e gli strumenti, più router, revisioni e pulizia
+LIMITE_PASSAGGI = 21  # 10 per l'agente e gli strumenti, più riassunto, router, revisioni e pulizia
 
 PROMPT_DI_SISTEMA = (
     "Sei l'assistente del laboratorio e rispondi sempre in italiano. "
@@ -67,10 +68,12 @@ class RispostaNonValida(Exception):
 
 
 class Stato(TypedDict):
-    """Stato del grafo: la cronologia dei messaggi, in aggiunta a ogni passaggio, la decisione del router e lo
-    stato delle revisioni del turno (ripartono da zero a ogni turno, perché ogni turno parte dai soli messaggi)."""
+    """Stato del grafo: la cronologia dei messaggi, in aggiunta a ogni passaggio, il riassunto dei turni più vecchi
+    (passa da un turno all'altro e viene sostituito, non accumulato), la decisione del router e lo stato delle
+    revisioni del turno (ripartono da zero a ogni turno, perché ogni turno parte dai soli messaggi e dal riassunto)."""
 
     messages: Annotated[list[AnyMessage], add_messages]
+    riassunto: NotRequired[str]
     categoria: NotRequired[str]
     motivo_router: NotRequired[str]
     revisioni: NotRequired[int]
@@ -110,6 +113,9 @@ def costruisci_grafo(
     modello_router=None,
     revisore: str | None = None,
     revisioni_max: int = 2,
+    riassunto_istruzioni: str | None = None,
+    riassunto_soglia: int = 20,
+    riassunto_turni: int = 2,
 ) -> CompiledStateGraph:
     """Costruisce il grafo attorno a `modello` e agli `strumenti`.
 
@@ -119,6 +125,9 @@ def costruisci_grafo(
     Con `revisore` (istruzioni) la risposta senza strumenti va a nodo_revisore: se non è coerente, e le revisioni
     sono meno di `revisioni_max`, torna a nodo_llm con un'indicazione; altrimenti nodo_pulizia toglie bozze e
     indicazioni e il turno finisce. Il revisore usa lo stesso modello del router.
+    Con `riassunto_istruzioni` il grafo parte da nodo_riassunto: oltre `riassunto_soglia` messaggi sostituisce i
+    turni più vecchi con un riassunto, lasciando intatti gli ultimi `riassunto_turni` turni e la domanda in corso;
+    usa lo stesso modello del router, senza strumenti. Agente e router ricevono il riassunto nel prompt di sistema.
     Gli strumenti vengono associati al modello una volta sola, e solo se l'elenco non è vuoto:
     un elenco `tools` vuoto può essere rifiutato dall'API.
     """
@@ -130,13 +139,14 @@ def costruisci_grafo(
         revisore_llm = (modello_router or modello).with_structured_output(
             SCHEMA_REVISORE, method="json_schema", include_raw=True
         )
+    modello_ausiliario = modello_router or modello
     if strumenti:
         modello = modello.bind_tools(strumenti)
     per_nome = {strumento.name: strumento for strumento in strumenti}
 
     def nodo_llm(stato: Stato) -> dict:
         """Interroga il modello con il prompt di sistema (non salvato) e la cronologia."""
-        messaggi = [SystemMessage(PROMPT_DI_SISTEMA), *stato["messages"]]
+        messaggi = [SystemMessage(con_riassunto(PROMPT_DI_SISTEMA, stato.get("riassunto", ""))), *stato["messages"]]
         logger.info("nodo_llm: chiamata al modello (%d messaggi)", len(messaggi))
         inizio = time.perf_counter()
         risposta = modello.invoke(messaggi)
@@ -186,7 +196,8 @@ def costruisci_grafo(
 
     def nodo_router(stato: Stato) -> dict:
         """Classifica l'ultima domanda; qualsiasi errore del router fa passare la domanda all'agente."""
-        messaggi = [SystemMessage(ambito), *messaggi_per_il_router(stato["messages"])]
+        prompt = con_riassunto(ambito, stato.get("riassunto", ""))
+        messaggi = [SystemMessage(prompt), *messaggi_per_il_router(stato["messages"])]
         inizio = time.perf_counter()
         try:
             categoria, motivo = leggi_decisione(router.invoke(messaggi))
@@ -233,6 +244,37 @@ def costruisci_grafo(
             "approvata": False,
         }
 
+    def nodo_riassunto(stato: Stato) -> dict:
+        """Oltre la soglia sostituisce i turni più vecchi con un riassunto; qualsiasi errore lascia tutto com'è."""
+        messaggi = stato["messages"]
+        if len(messaggi) <= riassunto_soglia:
+            logger.debug("riassunto: %d messaggi, sotto la soglia di %d", len(messaggi), riassunto_soglia)
+            return {}
+        taglio = punto_di_taglio(messaggi, riassunto_turni)
+        if taglio == 0:
+            logger.debug("riassunto: %d messaggi, nessun turno da riassumere", len(messaggi))
+            return {}
+        richiesta = messaggi_per_il_riassunto(
+            riassunto_istruzioni, stato.get("riassunto", ""), trascrivi(messaggi[:taglio])
+        )
+        inizio = time.perf_counter()
+        try:
+            nuovo = modello_ausiliario.invoke(richiesta).text.strip()
+        except Exception as errore:
+            logger.warning("riassunto: errore (%s), cronologia invariata", type(errore).__name__)
+            return {}
+        if not nuovo:
+            logger.warning("riassunto: risposta vuota, cronologia invariata")
+            return {}
+        logger.info(
+            "riassunto: %d messaggi -> %d in %.1f s", len(messaggi), len(messaggi) - taglio,
+            time.perf_counter() - inizio,
+        )
+        return {
+            "riassunto": nuovo,
+            "messages": [RemoveMessage(id=messaggio.id) for messaggio in messaggi[:taglio]],
+        }
+
     def nodo_pulizia(stato: Stato) -> dict:
         """Toglie dalla cronologia le bozze rifiutate e le indicazioni del revisore."""
         scartati = stato.get("scartati", [])
@@ -249,12 +291,16 @@ def costruisci_grafo(
     costruttore = StateGraph(Stato)
     costruttore.add_node("nodo_llm", nodo_llm)
     costruttore.add_node("nodo_strumenti", nodo_strumenti)
-    if ambito is None:
-        costruttore.add_edge(START, "nodo_llm")
+    primo = "nodo_llm" if ambito is None else "nodo_router"
+    if riassunto_istruzioni is None:
+        costruttore.add_edge(START, primo)
     else:
+        costruttore.add_node("nodo_riassunto", nodo_riassunto)
+        costruttore.add_edge(START, "nodo_riassunto")
+        costruttore.add_edge("nodo_riassunto", primo)
+    if ambito is not None:
         costruttore.add_node("nodo_router", nodo_router)
         costruttore.add_node("nodo_rifiuto", nodo_rifiuto)
-        costruttore.add_edge(START, "nodo_router")
         costruttore.add_conditional_edges("nodo_router", instrada_router, ["nodo_llm", "nodo_rifiuto"])
         costruttore.add_edge("nodo_rifiuto", END)
     if revisore is None:
@@ -269,13 +315,20 @@ def costruisci_grafo(
     return costruttore.compile()
 
 
-def esegui_turno(grafo: CompiledStateGraph, cronologia: list[AnyMessage], testo: str) -> list[AnyMessage]:
-    """Esegue un turno e restituisce la nuova cronologia; `cronologia` non viene modificata.
+def esegui_turno_con_riassunto(
+    grafo: CompiledStateGraph, cronologia: list[AnyMessage], riassunto: str, testo: str
+) -> tuple[list[AnyMessage], str]:
+    """Esegue un turno e restituisce la nuova cronologia e il nuovo riassunto; gli argomenti non vengono modificati.
 
-    Se il turno fallisce l'eccezione risale a chi chiama, che conserva la cronologia di prima.
+    Se il turno fallisce l'eccezione risale a chi chiama, che conserva cronologia e riassunto di prima.
     """
     risultato = grafo.invoke(
-        {"messages": [*cronologia, HumanMessage(testo)]},
+        {"messages": [*cronologia, HumanMessage(testo)], "riassunto": riassunto},
         {"recursion_limit": LIMITE_PASSAGGI},
     )
-    return risultato["messages"]
+    return risultato["messages"], risultato.get("riassunto", "")
+
+
+def esegui_turno(grafo: CompiledStateGraph, cronologia: list[AnyMessage], testo: str) -> list[AnyMessage]:
+    """Esegue un turno senza riassunto precedente e restituisce la nuova cronologia (vedi `esegui_turno_con_riassunto`)."""
+    return esegui_turno_con_riassunto(grafo, cronologia, "", testo)[0]
