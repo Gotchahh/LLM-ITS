@@ -342,7 +342,7 @@ START → nodo_riassunto → nodo_router → nodo_llm ⇄ nodo_strumenti → nod
 - L'agente riceve il riassunto come primo messaggio della conversazione, dopo il prompt di sistema e solo nella
   chiamata: dentro il prompt di sistema gemma lo ignorava e, in un secondo messaggio di sistema, smetteva di chiamare
   gli strumenti (prove del 17/11/2026). Il router lo riceve in coda al suo prompt; il revisore no.
-- Se il riassunto non riesce (errore o risposta vuota) la cronologia resta com'era, con un `[WARNING]`, e il turno
+- Se il riassunto non riesce (errore, risposta vuota o troncata al tetto dei token) la cronologia resta com'era, con un `[WARNING]`, e il turno
   prosegue.
 
 Prova reale da pipe del 17/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`, PowerShell senza `PYTHONIOENCODING`),
@@ -808,8 +808,8 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
 
 - **Dopo un po' l'assistente dimentica qualcosa detto all'inizio** (per esempio il nome): controllare nel log la
   riga `riassunto: N messaggi -> M`; rendere più esplicito `riassunto.txt` su che cosa conservare, oppure alzare
-  `RIASSUNTO_TURNI` o `RIASSUNTO_SOGLIA` (più turni intatti, prompt più lunghi). Un `[WARNING] riassunto: errore (...)`
-  o `riassunto: risposta vuota` lascia la cronologia com'era: la risposta arriva comunque. `RIASSUNTO_SOGLIA` o
+  `RIASSUNTO_TURNI` o `RIASSUNTO_SOGLIA` (più turni intatti, prompt più lunghi). Un `[WARNING] riassunto: errore (...)`,
+  `riassunto: risposta vuota` o `riassunto: risposta troncata` lascia la cronologia com'era: la risposta arriva comunque. `RIASSUNTO_SOGLIA` o
   `RIASSUNTO_TURNI` non interi o minori di 1 fermano l'avvio con `Errore: RIASSUNTO_... non è valido ...` e codice 1;
   se manca `riassunto.txt`, `Errore: File del riassunto ... non trovato. Controllare RIASSUNTO_FILE ...`.
 - **Il revisore fa riscrivere risposte corrette** (`revisore: non coerente (...)` su risposte complete): rendere

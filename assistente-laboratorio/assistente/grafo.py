@@ -267,10 +267,15 @@ def costruisci_grafo(
         )
         inizio = time.perf_counter()
         try:
-            nuovo = modello_del_riassunto.invoke(richiesta).text.strip()
+            risposta = modello_del_riassunto.invoke(richiesta)
         except Exception as errore:
             logger.warning("riassunto: errore (%s), cronologia invariata", type(errore).__name__)
             return {}
+        if risposta.response_metadata.get("finish_reason") == "length":
+            # Un riassunto tagliato a metà sostituirebbe il precedente e cancellerebbe i messaggi per sempre.
+            logger.warning("riassunto: risposta troncata, cronologia invariata")
+            return {}
+        nuovo = risposta.text.strip()
         if not nuovo:
             logger.warning("riassunto: risposta vuota, cronologia invariata")
             return {}

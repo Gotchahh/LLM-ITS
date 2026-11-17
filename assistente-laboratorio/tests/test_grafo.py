@@ -649,3 +649,14 @@ def test_senza_riassunto_un_solo_messaggio_di_sistema_all_agente():
     agente = ModelloFinto([AIMessage("R1")])
     esegui_turno_con_riassunto(grafo_con_riassunto(agente, ModelloFinto([])), [], "", "D1")
     assert [m.type for m in agente.chiamate[0]] == ["system", "human"]
+
+
+def test_riassunto_troncato_lascia_tutto_invariato(caplog):
+    # Con finish_reason "length" il riassunto è tagliato a metà: sostituirlo cancellerebbe messaggi per sempre.
+    troncato = AIMessage("L'utente si chiama Otta", response_metadata={"finish_reason": "length"})
+    nuova, testo = esegui_turno_con_riassunto(
+        grafo_con_riassunto(ModelloFinto([AIMessage("R5")]), ModelloFinto([troncato]), soglia=6, turni=1),
+        turni_precedenti(4), "Precedente.", "D5")
+    assert len(nuova) == 10 and testo == "Precedente."
+    assert "riassunto: risposta troncata, cronologia invariata" in [
+        r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]

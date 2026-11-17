@@ -11,6 +11,19 @@ le informazioni importanti (per esempio il nome dell'utente detto al primo turno
 Lezione 6; l'utente ha chiesto di partire direttamente dalle slide, quindi le decisioni sotto sono dell'assistente
 salvo dove indicato.
 
+## Modifiche dopo le prove reali (17/11/2026, da confermare dall'utente)
+Le prove con gemma hanno portato a tre scostamenti da quanto approvato; le parti sotto restano come approvate:
+1. **Come l'agente riceve il riassunto**: non in coda al prompt di sistema ma come primo messaggio della conversazione
+   (un messaggio dell'utente subito dopo il prompt di sistema, solo nella chiamata, non nella cronologia). Con tutti gli
+   strumenti, in coda o in testa al prompt gemma ignorava il riassunto (0 su 4); in un secondo messaggio di sistema
+   smetteva di chiamare gli strumenti (0 su 3); come primo messaggio chiamava gli strumenti (3 su 3) e usava il nome
+   (2 su 2). Il router lo riceve ancora in coda al suo prompt; il revisore no.
+2. **Client dedicato al riassunto**: senza ragionamento come quello del router, ma con un tetto di 400 token invece di
+   80, che troncherebbe un riassunto di qualche riga. Un riassunto troncato comunque (`finish_reason` «length») è
+   trattato come un errore: cronologia invariata, WARNING `riassunto: risposta troncata, cronologia invariata`.
+3. **`riassunto.txt` con un esempio**: con regole generiche gemma scriveva «si è presentato dicendo il suo nome»
+   senza il nome, oppure copiava l'orario; un esempio unico (nome per esteso, ora senza valore) risolve entrambe.
+
 ## Requisiti delle slide (pag. 6 e 19)
 1. Soglia configurabile, in numero di messaggi o stima dei token, oltre la quale si riassume.
 2. Nodo riassunto all'inizio del turno: comprime i messaggi vecchi e conserva gli ultimi N.
