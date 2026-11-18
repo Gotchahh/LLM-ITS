@@ -14,13 +14,16 @@ RADICE = Path(__file__).resolve().parent.parent
 URI = "utente://preferenze"
 
 
-def col_server(operazione, *argomenti):
-    """Avvia `python -m preferenze_mcp [argomenti]`, apre una sessione e restituisce `await operazione(sessione)`."""
+def col_server(operazione, *argomenti, errori=sys.stderr):
+    """Avvia `python -m preferenze_mcp [argomenti]`, apre una sessione e restituisce `await operazione(sessione)`.
+
+    Lo stderr del server va in `errori`.
+    """
     async def esegui():
         parametri = StdioServerParameters(
             command=sys.executable, args=["-m", "preferenze_mcp", *argomenti], cwd=RADICE
         )
-        async with stdio_client(parametri) as (lettura, scrittura):
+        async with stdio_client(parametri, errlog=errori) as (lettura, scrittura):
             async with ClientSession(lettura, scrittura) as sessione:
                 await sessione.initialize()
                 return await operazione(sessione)
@@ -75,3 +78,15 @@ def test_file_mancante_errore_e_server_ancora_in_piedi(tmp_path):
 
     resource = col_server(lettura_fallita, str(tmp_path / "manca.json"))
     assert [str(r.uri) for r in resource.resources] == [URI]
+
+
+def test_file_mancante_nessun_traceback_sullo_stderr(tmp_path):
+    """Lo stderr del server finisce nel terminale della chat: l'errore lo riporta l'host, in una riga di log."""
+    async def lettura_fallita(sessione):
+        with pytest.raises(McpError):
+            await sessione.read_resource(URI)
+
+    stderr = tmp_path / "stderr.txt"
+    with stderr.open("w", encoding="utf-8") as errori:
+        col_server(lettura_fallita, str(tmp_path / "manca.json"), errori=errori)
+    assert stderr.read_text(encoding="utf-8") == ""

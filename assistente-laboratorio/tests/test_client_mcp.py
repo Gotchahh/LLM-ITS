@@ -2,6 +2,7 @@ import _thread
 import asyncio
 import logging
 import threading
+from pathlib import Path
 
 import pytest
 from langchain_core.tools import StructuredTool, ToolException
@@ -9,11 +10,16 @@ from langchain_core.tools import StructuredTool, ToolException
 from assistente import client_mcp
 from assistente.client_mcp import (
     CALCOLATRICE,
+    PREFERENZE,
+    SERVER_MCP,
+    URI_PREFERENZE,
     ErroreMCP,
     ErroreTrasportoMCP,
     ServerMCP,
     carica_server_mcp,
     carica_strumenti_mcp,
+    leggi_preferenze_mcp,
+    leggi_resource_mcp,
     rendi_sincrono,
 )
 
@@ -147,3 +153,58 @@ def test_errore_di_trasporto_nomina_il_server():
     with pytest.raises(ErroreTrasportoMCP) as errore:
         rendi_sincrono(strumento_che_solleva(OSError("pipe chiusa")), server="catalogo").invoke({"espressione": "1"})
     assert str(errore.value) == "server MCP catalogo non raggiungibile: pipe chiusa"
+
+
+RADICE = Path(__file__).resolve().parent.parent
+INIZIO_ERRORE_PREFERENZE = "resource utente://preferenze non letta dal server MCP preferenze (python"
+
+
+def server_preferenze(*argomenti):
+    return ServerMCP("preferenze", ("-m", "preferenze_mcp", *argomenti), ())
+
+
+def test_lettura_delle_preferenze_del_progetto():
+    assert leggi_preferenze_mcp() == (RADICE / "preferenze.json").read_text(encoding="utf-8")
+
+
+def test_lettura_di_una_resource_da_un_file_indicato(tmp_path):
+    file = tmp_path / "preferenze.json"
+    file.write_text('{"lingua": "inglese"}', encoding="utf-8")
+    assert leggi_resource_mcp(server_preferenze(str(file)), URI_PREFERENZE) == '{"lingua": "inglese"}'
+
+
+@pytest.mark.parametrize("server", [
+    ServerMCP("preferenze", ("-m", "modulo_che_non_esiste"), ()),
+    server_preferenze("file_che_non_esiste.json"),
+], ids=["server mancante", "file mancante"])
+def test_lettura_fallita_e_un_errore_mcp(server):
+    with pytest.raises(ErroreMCP) as errore:
+        leggi_resource_mcp(server, URI_PREFERENZE)
+    messaggio = str(errore.value)
+    assert messaggio.startswith(INIZIO_ERRORE_PREFERENZE) and messaggio.split("): ", 1)[1].strip()
+
+
+def test_le_preferenze_non_sono_tra_i_server_degli_strumenti():
+    assert PREFERENZE not in SERVER_MCP
+    assert PREFERENZE.argomenti == ("-m", "preferenze_mcp") and PREFERENZE.richiesti == ()
+
+
+def test_ctrl_c_durante_la_lettura_delle_preferenze_non_diventa_un_errore_mcp(monkeypatch):  # Review Focus 5
+    class ClientLento:
+        def __init__(self, *argomenti, **opzioni):
+            pass
+
+        async def get_resources(self, *argomenti, **opzioni):
+            await attesa_che_trasforma_la_cancellazione()
+
+    monkeypatch.setattr(client_mcp, "MultiServerMCPClient", ClientLento)
+    timer = ctrl_c_tra(0.2)
+    with pytest.raises(KeyboardInterrupt):
+        leggi_preferenze_mcp()
+    timer.join()
+
+
+def test_file_mancante_il_messaggio_dice_il_motivo_vero():
+    with pytest.raises(ErroreMCP) as errore:
+        leggi_resource_mcp(server_preferenze("manca.json"), URI_PREFERENZE)
+    assert "manca.json" in str(errore.value) and "Error fetching resource" not in str(errore.value)

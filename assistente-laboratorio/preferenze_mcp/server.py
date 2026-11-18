@@ -10,7 +10,9 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-server = FastMCP("preferenze", log_level="WARNING")
+# FastMCP registra ogni lettura fallita con il traceback, e lo stderr del server finisce nel terminale della chat:
+# il server resta silenzioso e il motivo arriva all'host nella risposta d'errore, che lo riporta in una riga di log.
+server = FastMCP("preferenze", log_level="CRITICAL")
 percorso = Path("preferenze.json")
 
 

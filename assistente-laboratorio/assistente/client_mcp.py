@@ -1,7 +1,8 @@
-"""Client MCP: legge il catalogo dei server MCP (calcolatrice e catalogo) e rende sincroni i loro strumenti.
+"""Client MCP: legge il catalogo dei server MCP (calcolatrice e catalogo) e rende sincroni i loro strumenti;
+legge anche la resource delle preferenze dell'utente, che l'host usa come contesto e non diventa uno strumento.
 
 È l'unico modulo dell'agente che importa `asyncio` e `langchain_mcp_adapters`: il resto del programma
-(grafo, CLI) resta sincrono e vede soltanto strumenti LangChain ordinari.
+(grafo, CLI) resta sincrono e vede soltanto strumenti LangChain ordinari e testo.
 """
 
 import asyncio
@@ -38,6 +39,10 @@ CATALOGO = ServerMCP(
 )
 SERVER_MCP = (CALCOLATRICE, CATALOGO)
 
+# Server della sola resource delle preferenze: non espone strumenti e non è tra i server degli strumenti.
+PREFERENZE = ServerMCP("preferenze", ("-m", "preferenze_mcp"), ())
+URI_PREFERENZE = "utente://preferenze"
+
 
 class ErroreMCP(Exception):
     """Il server MCP non si avvia o non espone lo strumento richiesto."""
@@ -57,6 +62,14 @@ def _prima_foglia(errore: BaseException) -> BaseException:
 def _dettaglio(errore: BaseException) -> str:
     """Testo della prima foglia di `errore` o, se vuoto, il nome del suo tipo."""
     foglia = _prima_foglia(errore)
+    return str(foglia) or type(foglia).__name__
+
+
+def _causa_prima(errore: BaseException) -> str:
+    """Testo della causa più interna di `errore` (per esempio l'errore del server dietro quello dell'adattatore)."""
+    foglia = _prima_foglia(errore)
+    while foglia.__cause__ is not None:
+        foglia = _prima_foglia(foglia.__cause__)
     return str(foglia) or type(foglia).__name__
 
 
@@ -121,20 +134,29 @@ def rendi_sincrono(strumento_mcp: BaseTool, server: str = CALCOLATRICE.nome) -> 
     )
 
 
+def _connessione(server: ServerMCP) -> dict:
+    """Connessione stdio al server: interprete corrente, dalla cartella del progetto."""
+    return {
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": list(server.argomenti),
+        "cwd": str(CARTELLA_PROGETTO),
+    }
+
+
+def _comando(server: ServerMCP) -> str:
+    """Il comando del server per i messaggi d'errore, per esempio `python.exe -m calcolatrice_mcp`."""
+    return " ".join([Path(sys.executable).name, *server.argomenti])
+
+
 def carica_server_mcp(server: ServerMCP) -> list[BaseTool]:
     """Avvia un server MCP, ne legge il catalogo e restituisce gli strumenti sincroni.
 
     Il server si avvia con l'interprete corrente, dalla cartella del progetto. Se non parte, non espone
     strumenti o non espone uno degli strumenti richiesti, solleva `ErroreMCP` con un messaggio in italiano.
     """
-    comando = " ".join([Path(sys.executable).name, *server.argomenti])
-    connessione = {
-        "transport": "stdio",
-        "command": sys.executable,
-        "args": list(server.argomenti),
-        "cwd": str(CARTELLA_PROGETTO),
-    }
-    client = MultiServerMCPClient({server.nome: connessione}, handle_tool_errors=False)
+    comando = _comando(server)
+    client = MultiServerMCPClient({server.nome: _connessione(server)}, handle_tool_errors=False)
     inizio = time.perf_counter()
     try:
         strumenti = _esegui(client.get_tools())
@@ -156,3 +178,26 @@ def carica_server_mcp(server: ServerMCP) -> list[BaseTool]:
 def carica_strumenti_mcp(elenco: Sequence[ServerMCP] = SERVER_MCP) -> list[BaseTool]:
     """Gli strumenti sincroni di tutti i server dell'elenco, nell'ordine; il primo server che fallisce ferma tutto."""
     return [strumento for server in elenco for strumento in carica_server_mcp(server)]
+
+
+def leggi_resource_mcp(server: ServerMCP, uri: str) -> str:
+    """Avvia il server MCP, legge la resource `uri` e ne restituisce il testo.
+
+    Server che non parte, resource che non si legge o senza contenuto: `ErroreMCP` con un messaggio in italiano.
+    Nessuna riga di log: le scrive chi usa il testo.
+    """
+    client = MultiServerMCPClient({server.nome: _connessione(server)})
+    try:
+        contenuti = _esegui(client.get_resources(server.nome, uris=[uri]))
+    except Exception as errore:
+        raise ErroreMCP(
+            f"resource {uri} non letta dal server MCP {server.nome} ({_comando(server)}): {_causa_prima(errore)}"
+        ) from errore
+    if not contenuti:
+        raise ErroreMCP(f"resource {uri} non letta dal server MCP {server.nome} ({_comando(server)}): nessun contenuto")
+    return contenuti[0].as_string()
+
+
+def leggi_preferenze_mcp() -> str:
+    """Il testo della resource delle preferenze dell'utente (`utente://preferenze`)."""
+    return leggi_resource_mcp(PREFERENZE, URI_PREFERENZE)
