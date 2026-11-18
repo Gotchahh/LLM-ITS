@@ -40,7 +40,11 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
     istante iniettabile).
   - `convertitore.py`: strumento `converti` (lunghezze, pesi, temperature; logica pura e fabbrica dello strumento).
   - `modello.py`: `ChatOpenAI` verso LM Studio e controllo dell'elenco modelli all'avvio.
-  - `grafo.py`: stato, nodi e instradamento; `costruisci_grafo(modello, strumenti, ambito, modello_router, revisore, revisioni_max)`.
+  - `grafo.py`: stato, nodi e instradamento; `costruisci_grafo(modello, strumenti, ambito, modello_router, revisore,
+    revisioni_max, riassunto_istruzioni=..., riassunto_soglia=..., riassunto_turni=..., modello_riassunto=...)`;
+    la CLI usa `esegui_turno_con_riassunto(grafo, cronologia, riassunto, testo)`.
+  - `riassunto.py`: punto di taglio a inizio turno, trascrizione, messaggi per il riassunto e per l'agente; istruzioni
+    in `riassunto.txt` (`RIASSUNTO_FILE`), soglia `RIASSUNTO_SOGLIA`, turni conservati `RIASSUNTO_TURNI`.
   - `router.py`: schema della decisione del router, messaggi da classificare, rifiuto; il prompt del router è
     `ambito.txt` (variabile `AMBITO_FILE`).
   - `revisore.py`: schema della valutazione del revisore (motivo prima del verdetto), indicazione per l'agente;

@@ -1,10 +1,14 @@
 # Riassunto della cronologia — piano di implementazione
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Esecuzione:** superpowers:executing-plans, task per task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **Aggiornato il 18/11/2026** per allinearlo al codice unito in `dev` dopo le «Modifiche dopo le prove reali» della
+> specifica: l'agente riceve il riassunto come primo messaggio (`messaggi_di_contesto`), il riassunto ha un client
+> dedicato (`modello_riassunto`, `crea_modello_riassunto`) e una risposta troncata è trattata come un errore.
 
 **Goal:** un nodo LLM `nodo_riassunto` all'inizio del turno che, oltre `RIASSUNTO_SOGLIA` messaggi, sostituisce i turni più vecchi con un riassunto (campo `riassunto` dello stato, sostituito e non accumulato) e lascia intatti gli ultimi `RIASSUNTO_TURNI` turni e la domanda in corso.
 
-**Architecture:** `assistente/riassunto.py` contiene le funzioni pure: punto di taglio a inizio turno, trascrizione testuale, messaggi per il modello, aggiunta del riassunto a un prompt di sistema. In `costruisci_grafo` il nodo si attiva solo se riceve le istruzioni e si mette tra `START` e il nodo che oggi parte per primo (router o agente); usa `(modello_router or modello)` senza strumenti e toglie i messaggi riassunti con `RemoveMessage`. Agente e router ricevono il riassunto in coda al prompt di sistema. La CLI conserva cronologia e riassunto tra un turno e l'altro tramite `esegui_turno_con_riassunto`.
+**Architecture:** `assistente/riassunto.py` contiene le funzioni pure: punto di taglio a inizio turno, trascrizione testuale, messaggi per il modello, aggiunta del riassunto a un prompt di sistema. In `costruisci_grafo` il nodo si attiva solo se riceve le istruzioni e si mette tra `START` e il nodo che oggi parte per primo (router o agente); usa `modello_riassunto or modello_router or modello` senza strumenti e toglie i messaggi riassunti con `RemoveMessage`. Il router riceve il riassunto in coda al prompt di sistema (`con_riassunto`), l'agente come messaggio dopo il prompt e prima della cronologia (`messaggi_di_contesto`). La CLI conserva cronologia e riassunto tra un turno e l'altro tramite `esegui_turno_con_riassunto`.
 
 **Tech Stack:** Python 3.14.7, LangGraph (`add_messages`, `RemoveMessage`), `langchain_core`. Nessuna dipendenza nuova.
 
@@ -14,9 +18,9 @@
 - Variabili: `RIASSUNTO_FILE` (default `riassunto.txt`), `RIASSUNTO_SOGLIA` (intero ≥ 1, default 20), `RIASSUNTO_TURNI` (intero ≥ 1, default 2). Valore non valido → `ErroreConfigurazione` che nomina la variabile, codice 1, nessun traceback.
 - Si riassume solo se `len(messaggi) > soglia` **e** il punto di taglio è > 0; altrimenti il modello del riassunto non viene chiamato.
 - Il taglio cade sempre subito prima di un `HumanMessage`; si conservano la domanda in corso e i `turni` turni precedenti.
-- Log: INFO `riassunto: 24 messaggi -> 7 in 8.1 s`; DEBUG `riassunto: 12 messaggi, sotto la soglia di 20`; DEBUG `riassunto: 22 messaggi, nessun turno da riassumere`; WARNING `riassunto: errore (<Tipo>), cronologia invariata`; WARNING `riassunto: risposta vuota, cronologia invariata`.
-- Errore o testo vuoto del modello del riassunto: cronologia e riassunto invariati, il turno prosegue.
-- Il revisore non riceve il riassunto; agente e router sì.
+- Log: INFO `riassunto: 24 messaggi -> 7 in 8.1 s`; DEBUG `riassunto: 12 messaggi, sotto la soglia di 20`; DEBUG `riassunto: 22 messaggi, nessun turno da riassumere`; WARNING `riassunto: errore (<Tipo>), cronologia invariata`; WARNING `riassunto: risposta vuota, cronologia invariata`; WARNING `riassunto: risposta troncata, cronologia invariata`.
+- Errore, testo vuoto o risposta troncata (`finish_reason` «length») del modello del riassunto: cronologia e riassunto invariati, il turno prosegue.
+- Il revisore non riceve il riassunto; agente e router sì (l'agente come primo messaggio della conversazione, il router in coda al prompt).
 - `LIMITE_PASSAGGI = 21` (20 di prima più il nodo del riassunto).
 - Nessun import di `pydantic`, `openai`, `httpx` in `assistente/`.
 - Comandi: `.\.venv\Scripts\python.exe -m pytest -q` (senza modello), `-m pytest -m reale -v` (con LM Studio).
@@ -54,9 +58,9 @@
   - `con_riassunto(prompt: str, riassunto: str) -> str`: `prompt` invariato se `riassunto` è vuoto, altrimenti `prompt + "\n\nRiassunto della conversazione precedente (i turni più vecchi):\n" + riassunto`.
 - Produces (`grafo.py`):
   - `Stato.riassunto: NotRequired[str]`.
-  - `costruisci_grafo(..., revisioni_max: int = 2, riassunto_istruzioni: str | None = None, riassunto_soglia: int = 20, riassunto_turni: int = 2)`; con istruzioni: `START → nodo_riassunto →` (router se c'è, altrimenti `nodo_llm`); senza: grafo di oggi.
-  - `nodo_riassunto` restituisce `{}` oppure `{"riassunto": <nuovo>, "messages": [RemoveMessage(id) per ogni messaggio prima del taglio]}`; chiama `(modello_router or modello).invoke(...)` e usa `.text.strip()`.
-  - `nodo_llm` e `nodo_router` usano `con_riassunto(..., stato.get("riassunto", ""))` nel `SystemMessage`.
+  - `costruisci_grafo(..., revisioni_max: int = 2, riassunto_istruzioni: str | None = None, riassunto_soglia: int = 20, riassunto_turni: int = 2, modello_riassunto=None)`; con istruzioni: `START → nodo_riassunto →` (router se c'è, altrimenti `nodo_llm`); senza: grafo di oggi.
+  - `nodo_riassunto` restituisce `{}` oppure `{"riassunto": <nuovo>, "messages": [RemoveMessage(id) per ogni messaggio prima del taglio]}`; chiama `(modello_riassunto or modello_router or modello).invoke(...)`, scarta una risposta con `finish_reason` «length» e usa `.text.strip()`.
+  - `nodo_router` usa `con_riassunto(..., stato.get("riassunto", ""))` nel `SystemMessage`; `nodo_llm` usa `messaggi_di_contesto(PROMPT_DI_SISTEMA, stato.get("riassunto", ""))` (prompt invariato più un `HumanMessage` con il riassunto, solo nella chiamata).
   - `esegui_turno_con_riassunto(grafo, cronologia: list[AnyMessage], riassunto: str, testo: str) -> tuple[list[AnyMessage], str]`; `esegui_turno` resta com'è (firma e ritorno) e delega con `riassunto=""`.
   - `LIMITE_PASSAGGI = 21`.
 
@@ -69,7 +73,7 @@
     - `test_riassunto_con_strumenti_non_lascia_orfani` (turni con `AIMessage(tool_calls=[…id "t1"])` + `ToolMessage(tool_call_id="t1")` prima e dopo il taglio: ogni `tool_call_id` restante ha la sua richiesta e viceversa);
     - `test_riassunto_sopra_la_soglia_senza_turni_da_tagliare` (soglia 2, turni 2, un solo turno precedente con strumenti: nessuna chiamata, DEBUG `nessun turno da riassumere`);
     - `test_riassunto_errore_o_vuoto_lascia_tutto_invariato` (parametrizzato `RuntimeError("giù")` / `AIMessage("  ")`: cronologia completa, riassunto precedente invariato, WARNING, la risposta dell'agente arriva);
-    - `test_agente_e_router_ricevono_il_riassunto_il_revisore_no` (grafo con ambito, revisore e riassunto in ingresso «Si chiama Ottavio.»: il `SystemMessage` dell'agente e quello del router contengono «Ottavio», i messaggi del revisore no);
+    - `test_agente_e_router_ricevono_il_riassunto_il_revisore_no` (grafo con ambito, revisore e riassunto in ingresso «Si chiama Ottavio.»: il `SystemMessage` del router e il messaggio che l'agente riceve dopo il suo prompt contengono «Ottavio», i messaggi del revisore no);
     - `test_turno_rifiutato_viene_riassunto` (un turno precedente risposto da `nodo_rifiuto` finisce nella trascrizione e viene tolto);
     - `test_senza_istruzioni_nessun_nodo_riassunto` (`"nodo_riassunto" not in grafo.get_graph().nodes`).
   - Run: `.\.venv\Scripts\python.exe -m pytest tests/test_riassunto.py tests/test_grafo.py -q` → falliscono.
