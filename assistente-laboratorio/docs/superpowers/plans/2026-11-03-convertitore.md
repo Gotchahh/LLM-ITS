@@ -1,6 +1,6 @@
 # Convertitore di unità nel grafo — piano di implementazione
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Esecuzione:** superpowers:executing-plans, task per task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** aggiungere lo strumento locale `converti(valore, da, a)` per lunghezze, pesi e temperature, eseguito dal ciclo del grafo esistente.
 
@@ -152,4 +152,4 @@ def test_conversioni(valore, da, a, atteso): assert converti(valore, da, a) == a
   Run: `.\.venv\Scripts\python.exe -m pytest -q` → tutto verde. Due commit: `test(reale): aggiunge le prove reali del convertitore` (`tests/test_reale.py`) e `docs: documenta il convertitore nel README e nel CLAUDE.md` (`README.md`, `CLAUDE.md`).
 
 ### Dopo i task
-Una revisione finale dell'intero branch con un subagente `opus` (`git diff 5d971fc..HEAD`), correzione di ciò che è Critical o Important, resoconto all'utente. Merge in `dev` solo su sua richiesta.
+Revisione finale dell'intero branch su `git diff 5d971fc..HEAD`, correzione di ciò che è Critical o Important, resoconto all'utente. Merge in `dev` solo su sua richiesta.

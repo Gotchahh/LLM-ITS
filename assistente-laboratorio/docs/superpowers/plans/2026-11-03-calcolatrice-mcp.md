@@ -1,6 +1,6 @@
 # Calcolatrice sicura via MCP — piano di implementazione
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Esecuzione:** superpowers:executing-plans, task per task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** aggiungere all'assistente una calcolatrice sicura servita da un server MCP locale (stdio), scoperta
 all'avvio e usata dal grafo esistente, con errori restituiti al modello come `ToolMessage` d'errore.
@@ -272,7 +272,7 @@ def test_discovery_restituisce_strumenti_sincroni(caplog):
 
   `.\.venv\Scripts\python.exe -m pytest tests/test_client_mcp.py -v` → FAIL (import). Dopo un'implementazione
   minima di `carica_strumenti_mcp`: PASS. Se fallisce per lo stderr del figlio (`fileno`, flusso non valido):
-  fermarsi e riportarlo al controller.
+  fermarsi e capirne la causa prima di proseguire.
 - [ ] **Step 2: Scrivere gli altri test** (stesso file)
 
 ```python
@@ -582,9 +582,9 @@ def test_reale_calcolo(grafo):
 ---
 
 ## Dopo il piano
-1. Revisione finale dell'intero branch con **Opus**, dall'inizio del piano a `HEAD`. Poi una sola ondata di
+1. Revisione finale dell'intero branch, dall'inizio del piano a `HEAD`. Poi una sola ondata di
    correzioni e una revisione mirata.
-2. Verifica del controller, rieseguita di persona: test automatici, test reali, prove da pipe in locale e in Docker,
+2. Verifica finale: test automatici, test reali, prove da pipe in locale e in Docker,
    `git status` pulito.
 3. Merge in `dev` (`git merge --no-ff feature/calcolatrice -m "merge: integra feature/calcolatrice in dev"`) **solo
    su richiesta dell'utente**, poi i test su `dev`. Nessun push senza richiesta.

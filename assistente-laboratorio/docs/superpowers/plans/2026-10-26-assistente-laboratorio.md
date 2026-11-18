@@ -1,6 +1,6 @@
 # Assistente del laboratorio — piano di implementazione
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Esecuzione:** superpowers:executing-plans, task per task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** chat da terminale con grafo LangGraph esplicito, modello locale in LM Studio, cronologia di
 sessione, strumento orologio richiesto via tool calling e avvio con Docker Compose.

@@ -1,6 +1,6 @@
 # Giorni e scadenze nel grafo — piano di implementazione
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Esecuzione:** superpowers:executing-plans, task per task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** aggiungere quattro strumenti locali sul calendario (`giorni_tra`, `sposta_data`, `giorno_settimana`, `pasqua`), eseguiti dal ciclo del grafo esistente.
 
@@ -136,4 +136,4 @@
   Run: `.\.venv\Scripts\python.exe -m pytest -q` → tutto verde. Commit `test(reale): aggiunge le prove reali del calendario` (`tests/test_reale.py`) e `docs: documenta giorni e scadenze nel README e nel CLAUDE.md` (`README.md`, `CLAUDE.md`, la specifica).
 
 ### Dopo i task
-Una revisione finale dell'intero branch con un subagente `opus` (`git diff b3b2eb3..HEAD`), correzione di ciò che è Critical o Important con test RED→GREEN, resoconto all'utente. Merge in `dev` solo su sua richiesta.
+Revisione finale dell'intero branch su `git diff b3b2eb3..HEAD`, correzione di ciò che è Critical o Important con test RED→GREEN, resoconto all'utente. Merge in `dev` solo su sua richiesta.
