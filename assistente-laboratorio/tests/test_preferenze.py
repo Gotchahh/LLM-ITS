@@ -116,9 +116,9 @@ def test_carica_resource_non_disponibile(avvisi, leggi, motivo):
 
 def test_blocco_completo():
     assert blocco_preferenze(Preferenze("inglese", NEW_YORK, None)) == (
-        "Preferenze dell'utente: rispondi sempre in inglese. Il fuso orario predefinito dell'utente è "
-        "America/New_York: per l'ora, la data o il giorno attuali senza una località indicata chiama "
-        "ora_corrente con fuso America/New_York."
+        "Preferenze dell'utente: rispondi sempre in inglese. L'utente vive nel fuso orario America/New_York: "
+        "ogni volta che chiami ora_corrente senza che l'utente abbia nominato un'altra città, passa sempre "
+        "l'argomento fuso=\"America/New_York\" (non ometterlo)."
     )
 
 

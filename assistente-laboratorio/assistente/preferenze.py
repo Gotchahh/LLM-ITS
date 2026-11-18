@@ -118,10 +118,13 @@ def carica_preferenze(leggi: Callable[[], str], fuso_predefinito: ZoneInfo) -> P
 def blocco_preferenze(preferenze: Preferenze) -> str:
     """Le frasi da mettere in cima al prompt dell'agente: lingua, fuso predefinito e, se c'è, stile."""
     fuso = preferenze.fuso.key
+    # Prove del 18/11/2026 con gemma: «chiama ora_corrente con fuso X» veniva ignorato (fuso omesso, come dice la
+    # descrizione dello strumento); «passa sempre l'argomento fuso="X" (non ometterlo)» viene seguito, e con una
+    # città nominata il modello usa ancora il fuso di quella città.
     blocco = (
         f"Preferenze dell'utente: rispondi sempre in {preferenze.lingua}. "
-        f"Il fuso orario predefinito dell'utente è {fuso}: per l'ora, la data o il giorno attuali "
-        f"senza una località indicata chiama ora_corrente con fuso {fuso}."
+        f"L'utente vive nel fuso orario {fuso}: ogni volta che chiami ora_corrente senza che l'utente abbia "
+        f"nominato un'altra città, passa sempre l'argomento fuso=\"{fuso}\" (non ometterlo)."
     )
     if preferenze.stile is not None:
         blocco += " " + STILI[preferenze.stile]
