@@ -9,6 +9,10 @@ services:
       NOTE_API_URL: http://note:8000
     depends_on:
       - note
+    volumes:
+      # Le preferenze dell'utente si leggono dal file dell'host: modificarlo vale dalla sessione successiva,
+      # senza ricostruire l'immagine.
+      - ./preferenze.json:/app/preferenze.json:ro
     stdin_open: true
     tty: true
     extra_hosts:

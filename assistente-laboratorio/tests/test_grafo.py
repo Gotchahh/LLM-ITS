@@ -660,3 +660,41 @@ def test_riassunto_troncato_lascia_tutto_invariato(caplog):
     assert len(nuova) == 10 and testo == "Precedente."
     assert "riassunto: risposta troncata, cronologia invariata" in [
         r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+
+PREFERENZE = "Preferenze dell'utente: rispondi sempre in inglese."
+
+
+def test_il_prompt_non_impone_piu_la_lingua():
+    assert PROMPT_DI_SISTEMA.startswith("Sei l'assistente del laboratorio. ")
+    assert "italiano" not in PROMPT_DI_SISTEMA
+
+
+def test_le_preferenze_stanno_in_cima_al_prompt_dell_agente():
+    finto = ModelloFinto([AIMessage("Hi!")])
+    esegui_turno(costruisci_grafo(finto, [], preferenze=PREFERENZE), [], "ciao")
+    assert finto.chiamate[0][0].type == "system"
+    assert finto.chiamate[0][0].text == f"{PREFERENZE}\n\n{PROMPT_DI_SISTEMA}"
+
+
+def test_preferenze_solo_all_agente_anche_con_il_riassunto():
+    ausiliario = ModelloFinto([AIMessage("Si chiama Ottavio.")], decisioni=[decisione("conversazione", "nome")],
+                              valutazioni=[valutazione(True, "ok")])
+    agente = ModelloFinto([AIMessage("Your name is Ottavio.")])
+    esegui_turno_con_riassunto(
+        grafo_con_riassunto(agente, ausiliario, soglia=6, turni=1, ambito=AMBITO, revisore=REVISORE,
+                            preferenze=PREFERENZE),
+        turni_precedenti(4), "", "Come mi chiamo?")
+    assert len(ausiliario.chiamate) == 1                       # il riassunto è stato fatto
+    sistema, riassunto = agente.chiamate[0][:2]
+    assert sistema.text == f"{PREFERENZE}\n\n{PROMPT_DI_SISTEMA}" and riassunto.text.endswith("Si chiama Ottavio.")
+    altri = [*ausiliario.chiamate, *ausiliario.chiamate_router, *ausiliario.chiamate_revisore]
+    assert not any("Preferenze dell'utente" in m.text for chiamata in altri for m in chiamata)
+
+
+def test_le_preferenze_non_cambiano_gli_strumenti_associati():
+    senza, con = ModelloFinto([]), ModelloFinto([])
+    costruisci_grafo(senza, [orologio, strumento_di_prova])
+    costruisci_grafo(con, [orologio, strumento_di_prova], preferenze=PREFERENZE)
+    assert [[s.name for s in elenco] for elenco in con.strumenti_associati] == \
+        [[s.name for s in elenco] for elenco in senza.strumenti_associati] == [["ora_corrente", "strumento_di_prova"]]

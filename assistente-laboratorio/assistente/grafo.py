@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 LIMITE_PASSAGGI = 21  # 10 per l'agente e gli strumenti, più riassunto, router, revisioni e pulizia
 
 PROMPT_DI_SISTEMA = (
-    "Sei l'assistente del laboratorio e rispondi sempre in italiano. "
+    "Sei l'assistente del laboratorio. "
     "Per l'ora, la data o il giorno attuali chiama sempre lo strumento ora_corrente, "
     "anche se nella conversazione c'è già un risultato precedente: quel risultato è superato. "
     "Non dedurre informazioni temporali che il risultato non contiene. "
@@ -123,6 +123,7 @@ def costruisci_grafo(
     riassunto_soglia: int = 20,
     riassunto_turni: int = 2,
     modello_riassunto=None,
+    preferenze: str | None = None,
 ) -> CompiledStateGraph:
     """Costruisce il grafo attorno a `modello` e agli `strumenti`.
 
@@ -136,6 +137,8 @@ def costruisci_grafo(
     turni più vecchi con un riassunto, lasciando intatti gli ultimi `riassunto_turni` turni e la domanda in corso;
     usa `modello_riassunto` (predefinito: il modello del router), senza strumenti. L'agente riceve il riassunto in un
     messaggio prima della cronologia, il router in coda al suo prompt.
+    Con `preferenze` (le frasi costruite dalle preferenze dell'utente) il prompt di sistema del solo agente è
+    `preferenze`, una riga vuota e `PROMPT_DI_SISTEMA`; router, revisore e riassunto non le ricevono.
     Gli strumenti vengono associati al modello una volta sola, e solo se l'elenco non è vuoto:
     un elenco `tools` vuoto può essere rifiutato dall'API.
     """
@@ -151,10 +154,11 @@ def costruisci_grafo(
     if strumenti:
         modello = modello.bind_tools(strumenti)
     per_nome = {strumento.name: strumento for strumento in strumenti}
+    prompt_agente = f"{preferenze}\n\n{PROMPT_DI_SISTEMA}" if preferenze else PROMPT_DI_SISTEMA
 
     def nodo_llm(stato: Stato) -> dict:
         """Interroga il modello con il prompt di sistema e l'eventuale riassunto (non salvati) e la cronologia."""
-        messaggi = [*messaggi_di_contesto(PROMPT_DI_SISTEMA, stato.get("riassunto", "")), *stato["messages"]]
+        messaggi = [*messaggi_di_contesto(prompt_agente, stato.get("riassunto", "")), *stato["messages"]]
         logger.info("nodo_llm: chiamata al modello (%d messaggi)", len(messaggi))
         inizio = time.perf_counter()
         risposta = modello.invoke(messaggi)
