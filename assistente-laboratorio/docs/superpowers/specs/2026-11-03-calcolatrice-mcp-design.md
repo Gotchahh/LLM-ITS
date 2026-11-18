@@ -284,4 +284,4 @@ nuovi, una diagnosi per livelli come nelle slide (il server da solo → discover
 1. Commit di questa specifica su `feature/calcolatrice`: `docs: aggiunge la specifica della calcolatrice MCP`.
 2. Su richiesta dell'utente, `superpowers:writing-plans` per il piano a incrementi (logica pura → server
    FastMCP con dipendenze → client con discovery → integrazione nel grafo → prove reali → Docker → documentazione
-   e revisione finale con Opus), da approvare prima di scrivere codice.
+   e revisione finale), da approvare prima di scrivere codice.
