@@ -47,17 +47,19 @@ Evidenze richieste: log con il numero di messaggi prima e dopo il riassunto; un'
 - **Il riassunto sostituisce il precedente**: il modello riceve il riassunto precedente (se c'è) più i messaggi da
   togliere e scrive un nuovo riassunto unico, che prende il posto del vecchio nel campo `riassunto` dello stato. I
   messaggi riassunti vengono tolti dalla cronologia.
-- **Dove si usa il riassunto**: l'agente lo riceve in coda al prompt di sistema (per esempio «Riassunto della
+- **Dove si usa il riassunto** (per l'agente superato dalla modifica 1: lo riceve come primo messaggio della
+  conversazione): l'agente lo riceve in coda al prompt di sistema (per esempio «Riassunto della
   conversazione precedente: …»). Anche il router lo riceve in coda al suo prompt, così una domanda di seguito che
   si riferisce a qualcosa ormai riassunto non viene scambiata per fuori ambito. Il revisore no: giudica solo domanda
   e risposta del turno.
-- Stesso modello di LM Studio, client **senza ragionamento** (come router e revisore), **output testuale libero**
+- Stesso modello di LM Studio, client **senza ragionamento** (come router e revisore; client dedicato con 400 token
+  per la modifica 2), **output testuale libero**
   (non strutturato). Istruzioni in un file di configurazione **`riassunto.txt`** (versionato, variabile facoltativa
   `RIASSUNTO_FILE`), con gli stessi controlli di `ambito.txt`.
 - Il riassunto conserva le informazioni stabili (chi è l'utente, preferenze, decisioni prese, note e apparecchi di
   cui si è parlato, domande lasciate aperte) e **non** i risultati che invecchiano, come l'ora corrente: per quelli
   l'agente deve richiamare lo strumento.
-- **Errore o risposta vuota del riassunto → nessuna compressione**: la cronologia e il riassunto precedente restano
+- **Errore, risposta vuota o troncata (modifica 2) del riassunto → nessuna compressione**: la cronologia e il riassunto precedente restano
   come sono, WARNING nel log, il turno prosegue (stesso principio di router e revisore: un nodo ausiliario che
   fallisce non blocca la risposta).
 - **Il riassunto vive solo per la sessione**, come la cronologia: la CLI lo conserva tra un turno e l'altro insieme
@@ -125,8 +127,10 @@ nodo_llm (risposta senza strumenti) → nodo_revisore → … (invariato)
   - turni con strumenti: dopo il taglio nessuna richiesta di strumento senza il suo `ToolMessage` e nessun
     `ToolMessage` orfano;
   - sopra la soglia ma con meno di N+1 turni: nessuna chiamata;
-  - errore e testo vuoto del modello: cronologia e riassunto invariati, WARNING, il turno prosegue;
-  - l'agente e il router ricevono il riassunto nel prompt di sistema; il revisore no;
+  - errore, testo vuoto e risposta troncata del modello: cronologia e riassunto invariati, WARNING, il turno
+    prosegue;
+  - il router riceve il riassunto nel prompt di sistema, l'agente come primo messaggio della conversazione
+    (modifica 1); il revisore no;
   - CLI: il riassunto passa da un turno all'altro e resta invariato dopo un turno fallito;
   - configurazione: file mancante o vuoto, `RIASSUNTO_SOGLIA` e `RIASSUNTO_TURNI` non validi.
 - **Prove reali con gemma** (soglia bassa impostata dal test): al primo turno l'utente dice il proprio nome, poi
