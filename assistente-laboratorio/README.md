@@ -382,11 +382,15 @@ Tu> Alla prossima!
 (Righe di router, `nodo_llm` e revisore omesse.) Al quarto turno il primo turno non è più nella cronologia: il nome
 arriva dal riassunto.
 
-**Da provare in Docker.** La prova del riassunto in Docker non è ancora stata eseguita: il 17/11/2026 Docker Desktop
-non si avviava (`Error response from daemon: Docker Desktop is unable to start`), e neppure il 18/11/2026. Il
-`Dockerfile` copia `riassunto.txt` nell'immagine. La prova da fare è la stessa sequenza della pipe, con
-`docker compose run --rm -T -e LOG_LEVEL=INFO -e RIASSUNTO_SOGLIA=4 -e RIASSUNTO_TURNI=1 assistente`, dopo
-`docker compose build`.
+**In Docker** (prova del 18/11/2026, dopo `docker compose build`; il `Dockerfile` copia `riassunto.txt`
+nell'immagine), stessa sequenza:
+
+```powershell
+"Ciao, mi chiamo Ottavio.`nQuanto fa 12 per 7?`nQuanti centimetri sono 3 pollici?`nCome mi chiamo?`n/esci" | docker compose run --rm -T -e LOG_LEVEL=INFO -e RIASSUNTO_SOGLIA=4 -e RIASSUNTO_TURNI=1 assistente
+```
+
+Stesso esito della prova locale: `riassunto: 7 messaggi -> 5` prima della terza domanda, `riassunto: 9 messaggi -> 5`
+prima della quarta, e all'ultima domanda `Assistente> Il tuo nome è Ottavio.`.
 
 ## Strumento orologio
 
@@ -760,12 +764,22 @@ Tu> Alla prossima!
 preferenze compare all'avvio, prima di ogni chiamata al modello. Sulla seconda domanda il router è arrivato al tetto
 dei token e ha passato la domanda all'agente, come descritto in «Router dell'ambito».
 
-**Da provare in Docker.** Il `Dockerfile` copia `preferenze_mcp/` e `preferenze.json` nell'immagine e `compose.yaml`
-monta il `preferenze.json` dell'host in sola lettura su `/app/preferenze.json`, così una modifica vale dalla sessione
-successiva senza `docker compose build`. La prova non è ancora stata eseguita: il 18/11/2026 Docker Desktop non si
-avviava (`Error response from daemon: Docker Desktop is unable to start`). La prova da fare è la stessa sequenza della
-pipe, con `docker compose run --rm -T -e LOG_LEVEL=INFO assistente` dopo `docker compose build`, modificando il file
-sull'host tra le due sessioni.
+**In Docker.** Il `Dockerfile` copia `preferenze_mcp/` e `preferenze.json` nell'immagine e `compose.yaml` monta il
+`preferenze.json` dell'host in sola lettura su `/app/preferenze.json`, così una modifica vale dalla sessione
+successiva senza `docker compose build`. Prova del 18/11/2026, dopo `docker compose build`, con la stessa riga UTF-8
+della pipe locale:
+
+```powershell
+"Che ore sono?`n/esci" | docker compose run --rm -T -e LOG_LEVEL=INFO assistente
+'{"lingua": "inglese", "fuso": "America/New_York", "stile": "dettagliato"}' | Out-File -Encoding ascii preferenze.json
+"Che ore sono?`n/esci" | docker compose run --rm -T -e LOG_LEVEL=INFO assistente
+git checkout -- preferenze.json
+```
+
+Con il file versionato: `lingua=italiano, fuso=Europe/Rome, stile=sintetico`, `ora_corrente {"fuso": "Europe/Rome"}`,
+`Assistente> Sono le 16:23:13 di mercoledì 18 novembre 2026 (Europe/Rome).`. Con il file modificato sull'host, senza
+ricostruire: `lingua=inglese, fuso=America/New_York, stile=dettagliato`, `ora_corrente {"fuso": "America/New_York"}`,
+`Assistente> It is Wednesday, November 18, 2026, at 10:27:50 AM (America/New_York).`.
 
 ## Mostrare e nascondere i log
 
