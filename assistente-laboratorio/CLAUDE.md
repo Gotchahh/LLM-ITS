@@ -41,10 +41,12 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   - `convertitore.py`: strumento `converti` (lunghezze, pesi, temperature; logica pura e fabbrica dello strumento).
   - `modello.py`: `ChatOpenAI` verso LM Studio e controllo dell'elenco modelli all'avvio.
   - `grafo.py`: stato, nodi e instradamento; `costruisci_grafo(modello, strumenti, ambito, modello_router, revisore,
-    revisioni_max, riassunto_istruzioni=..., riassunto_soglia=..., riassunto_turni=..., modello_riassunto=...)`;
-    la CLI usa `esegui_turno_con_riassunto(grafo, cronologia, riassunto, testo)`.
+    revisioni_max, riassunto_istruzioni=..., riassunto_soglia=..., riassunto_turni=..., modello_riassunto=...,
+    preferenze=...)`; la CLI usa `esegui_turno_con_riassunto(grafo, cronologia, riassunto, testo)`.
   - `riassunto.py`: punto di taglio a inizio turno, trascrizione, messaggi per il riassunto e per l'agente; istruzioni
     in `riassunto.txt` (`RIASSUNTO_FILE`), soglia `RIASSUNTO_SOGLIA`, turni conservati `RIASSUNTO_TURNI`.
+  - `preferenze.py`: controlli campo per campo delle preferenze lette dalla resource, predefiniti con WARNING,
+    `carica_preferenze` (all'avvio) e `blocco_preferenze`, il testo in cima al prompt dell'agente.
   - `router.py`: schema della decisione del router, messaggi da classificare, rifiuto; il prompt del router è
     `ambito.txt` (variabile `AMBITO_FILE`).
   - `revisore.py`: schema della valutazione del revisore (motivo prima del verdetto), indicazione per l'agente;
@@ -52,12 +54,16 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   - `cli.py`, `__main__.py`: ciclo di chat, cronologia, comandi `/esci` e `/log`, scritta «Ragionando...».
   - `note.py`: strumenti `salva_nota`, `elenca_note`, `cancella_nota`, wrapper `urllib` verso il servizio delle
     note (`NOTE_API_URL`).
-  - `client_mcp.py`: discovery dei server MCP (`SERVER_MCP`: calcolatrice e catalogo) e strumenti MCP resi sincroni
-    (unico modulo con `asyncio` e `langchain_mcp_adapters`).
+  - `client_mcp.py`: discovery dei server MCP (`SERVER_MCP`: calcolatrice e catalogo) e strumenti MCP resi sincroni;
+    lettura della resource `utente://preferenze` dal server `PREFERENZE` (`leggi_preferenze_mcp`) (unico modulo con
+    `asyncio` e `langchain_mcp_adapters`).
 - `calcolatrice_mcp/`: server MCP della calcolatrice (`calcolo.py` logica pura, `server.py` FastMCP su stdio),
   avviato dall'assistente con `python -m calcolatrice_mcp`; non importa nulla da `assistente/`.
 - `catalogo_mcp/`: server MCP del catalogo degli apparecchi (`apparecchi.py` logica pura, `apparecchi.json` dati,
   `server.py` FastMCP su stdio con tre strumenti), avviato con `python -m catalogo_mcp`; non importa da `assistente/`.
+- `preferenze_mcp/`: server MCP delle preferenze (`server.py` FastMCP su stdio, una resource e nessuno strumento),
+  avviato con `python -m preferenze_mcp [percorso]`; legge `preferenze.json` (versionato, montato in Docker);
+  non importa da `assistente/`.
 - `note_api/`: servizio FastAPI delle note (`archivio.py` SQLite, `server.py` endpoint), avviato con
   `python -m note_api` (`NOTE_DB`, `NOTE_HOST`, `NOTE_PORT`); non importa nulla da `assistente/`. `dati/` fuori da Git.
 - `tests/`: test automatici senza modello; `test_reale.py` contiene le prove con LM Studio (marcatore `reale`).
@@ -108,12 +114,15 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 ## Test e verifiche
 - Test automatici ripetibili che non richiedono un modello attivo (grafo, cronologia,
   instradamento, strumento con istante controllato).
-- Prove reali con LM Studio e con Docker tenute separate e attivate esplicitamente.
-- Una risposta simulata non dimostra che il modello locale sappia usare lo strumento.
+- Dal 18/11/2026 Claude non esegue prove che chiamano il modello (`pytest -m reale`, pipe, script, Docker con
+  il modello): sono lente. Le prove reali le faccio io a mano, guidato passo passo (comando da incollare e output
+  atteso); solo prove di base sul funzionamento, niente casi limite. Niente nuovi test `reale`; quelli esistenti
+  in `tests/test_reale.py` restano ma non si eseguono più di routine.
+- Una risposta simulata non dimostra che il modello locale sappia usare lo strumento: per questo la prova
+  manuale con il modello resta necessaria per ogni funzionalità nuova.
 - Server MCP/API e collegamenti testati senza modello (discovery, invocazione diretta, errori); la prova
-  reale verifica che il modello scelga lo strumento giusto.
-- Le prove da pipe si eseguono senza `PYTHONIOENCODING` (la shell di Claude la imposta), in una
-  PowerShell pulita.
+  manuale verifica che il modello scelga lo strumento giusto.
+- Le prove da pipe si eseguono senza `PYTHONIOENCODING`, in una PowerShell pulita.
 - Nel resoconto indicare che cosa è stato eseguito, con quale esito, e che cosa resta da provare.
 
 ## Git

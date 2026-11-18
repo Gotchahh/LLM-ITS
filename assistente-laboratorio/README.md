@@ -12,13 +12,15 @@ MCP (vedi «Catalogo della strumentazione»); il programma li esegue davvero. Pr
 che la domanda sia scientifica o sul laboratorio e rifiuta le altre (vedi «Router dell'ambito»); dopo la risposta
 un revisore controlla che risponda a tutta la domanda e, se no, la fa riscrivere (vedi «Revisore della risposta»).
 Quando la conversazione si allunga, all'inizio del turno un nodo di riassunto sostituisce i turni più vecchi con un
-riassunto e lascia intatti gli ultimi (vedi «Riassunto della cronologia»).
+riassunto e lascia intatti gli ultimi (vedi «Riassunto della cronologia»). All'avvio legge le preferenze
+dell'utente (lingua, fuso orario, stile) da una resource MCP e le mette in cima al prompt dell'agente (vedi
+«Preferenze dell'utente»).
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
 in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
 mancante sono del 02/11/2026; riprovati lo stesso giorno, con lo stesso esito, anche i messaggi d'errore della
-Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze, delle note, del catalogo, del router e del revisore del 09/11/2026; quelle del riassunto della cronologia del 17/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
+Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze, delle note, del catalogo, del router e del revisore del 09/11/2026; quelle del riassunto della cronologia del 17/11/2026; quelle delle preferenze del 18/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -156,6 +158,14 @@ unità, errori) e in `tests/test_grafo.py` (il giro nel grafo con un modello fin
 I test del catalogo (senza modello) sono in `tests/test_apparecchi.py` (logica pura e controllo del file JSON),
 `tests/test_server_catalogo.py` (il server avviato davvero su stdio), `tests/test_client_mcp.py` (i due server, errori
 d'avvio e di trasporto con il nome del server) e `tests/test_integrazione_mcp.py` (il grafo con un modello finto).
+
+I test delle preferenze (senza modello) sono in `tests/test_preferenze_mcp.py` (il server avviato davvero su stdio:
+resource, BOM, file riletto, file mancante senza traceback), `tests/test_client_mcp.py` (lettura della resource ed
+errori con il motivo), `tests/test_preferenze.py` (controlli campo per campo, predefiniti, avvisi, blocco del
+prompt), `tests/test_grafo.py` (il blocco in cima al prompt dell'agente) e `tests/test_main.py` (l'avvio). Le prove
+reali `test_reale_preferenze_fuso`, `test_reale_preferenze_lingua` e `test_reale_preferenze_stile` costruiscono il
+grafo con preferenze scelte dal test (fuso di New York, lingua inglese, i due stili a confronto), non con quelle del
+file.
 
 I test della calcolatrice (tutti senza modello) sono in quattro file:
 
@@ -373,8 +383,8 @@ Tu> Alla prossima!
 arriva dal riassunto.
 
 **Da provare in Docker.** La prova del riassunto in Docker non è ancora stata eseguita: il 17/11/2026 Docker Desktop
-non si avviava (`Error response from daemon: Docker Desktop is unable to start`). Il `Dockerfile` copia
-`riassunto.txt` nell'immagine. La prova da fare è la stessa sequenza della pipe, con
+non si avviava (`Error response from daemon: Docker Desktop is unable to start`), e neppure il 18/11/2026. Il
+`Dockerfile` copia `riassunto.txt` nell'immagine. La prova da fare è la stessa sequenza della pipe, con
 `docker compose run --rm -T -e LOG_LEVEL=INFO -e RIASSUNTO_SOGLIA=4 -e RIASSUNTO_TURNI=1 assistente`, dopo
 `docker compose build`.
 
@@ -672,6 +682,90 @@ risponde durante la chat (errore di trasporto), anche il modello riceve un `Tool
 (`server MCP calcolatrice non raggiungibile: ...`) e la chat continua; nel log compaiono due `[WARNING]`, uno di
 `client_mcp` e uno di `nodo_strumenti`. Questo caso è coperto solo dai test automatici. Se il server non parte
 all'avvio, il programma termina con codice 1 (vedi «Diagnosi»).
+
+## Preferenze dell'utente (resource MCP)
+
+Le preferenze dell'utente sono nel file `preferenze.json` della cartella del progetto:
+
+```json
+{"lingua": "italiano", "fuso": "Europe/Rome", "stile": "sintetico"}
+```
+
+Un terzo server MCP, `preferenze_mcp/` (`python -m preferenze_mcp [percorso]`, file predefinito `preferenze.json`),
+le offre come **resource** `utente://preferenze` (`application/json`) e non come strumento: sono dati che il
+programma legge, non un'azione che il modello sceglie. Il server restituisce il testo del file così com'è (toglie solo
+un BOM iniziale) e lo rilegge a ogni richiesta; i controlli li fa l'assistente (`assistente/preferenze.py`). Il
+client (`assistente/client_mcp.py`) legge la resource una volta, all'avvio, e le frasi che ne derivano vanno in cima
+al prompt di sistema dell'agente: una modifica al file vale dalla sessione successiva. Router e revisore non le
+ricevono; il revisore ha la regola che la lingua della risposta non è mai un motivo per farla riscrivere.
+
+| Campo | Valori ammessi | Predefinito |
+|---|---|---|
+| `lingua` | qualsiasi testo non vuoto (`italiano`, `inglese`, ...) | `italiano` |
+| `fuso` | nome IANA (`Europe/Rome`, `America/New_York`, ...) | il fuso di `APP_TIMEZONE` |
+| `stile` | `sintetico` o `dettagliato` | nessuna istruzione di stile |
+
+Spazi ai lati e maiuscole dello stile sono ignorati, come i campi in più. Il fuso è quello che l'agente passa a
+`ora_corrente` quando l'utente non nomina un'altra città («Che ore sono a Tokyo?» usa ancora `Asia/Tokyo`). Con gemma
+la frase «chiama ora_corrente con fuso X» veniva ignorata (lo strumento era chiamato senza fuso, quindi con
+`APP_TIMEZONE`); il prompt dice «passa sempre l'argomento fuso="X" (non ometterlo)», che viene seguita (prove del
+18/11/2026).
+
+Gli errori non fermano mai l'avvio, a differenza di quelli della calcolatrice e del catalogo:
+
+- campo mancante o non valido: si usa il suo predefinito, con un avviso per campo, per esempio
+  `[WARNING] preferenze: fuso non valido («Marte/Base»), si usa Europe/Rome` oppure
+  `[WARNING] preferenze: stile mancante, si usa nessuno stile`;
+- file mancante, testo che non è JSON o non è un oggetto, server che non parte:
+  `[WARNING] preferenze: resource non disponibile (<motivo>), valori predefiniti` e tutti i predefiniti.
+
+Limite noto: il fuso delle preferenze vale solo per `ora_corrente`; gli strumenti del calendario e delle note
+calcolano «oggi» con `APP_TIMEZONE`.
+
+Prova reale da pipe del 18/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`, PowerShell senza `PYTHONIOENCODING`, con
+la codifica UTF-8 impostata come in «Avvio»), prima con il file versionato:
+
+```powershell
+$env:LOG_LEVEL = "INFO"
+"Che ore sono?`nSpiegami in due frasi che cos'è una pipetta.`n/esci" | .\.venv\Scripts\python.exe -m assistente
+```
+
+```text
+[INFO] preferenze: resource utente://preferenze letta in 2.5 s: lingua=italiano, fuso=Europe/Rome, stile=sintetico
+[INFO] instradamento: richiesta strumento ora_corrente {"fuso": "Europe/Rome"}
+[INFO] nodo_strumenti: ora_corrente -> mercoledì 2026-11-18T14:19:38+01:00 (Europe/Rome)
+Tu> Assistente> Sono le 14:19:38 di mercoledì 2026-11-18 (Europe/Rome).
+Tu> Assistente> Una pipetta è un apparecchio di laboratorio utilizzato per misurare e trasferire volumi precisi di liquidi, essenziale in chimica e biologia. Esistono diversi tipi, come le micropipette o quelle volumetriche, adatte a specifiche applicazioni che richiedono alta accuratezza nel dosaggio.
+Tu> Alla prossima!
+```
+
+Poi con un altro file e le stesse domande, e infine il file versionato ripristinato:
+
+```powershell
+'{"lingua": "inglese", "fuso": "America/New_York", "stile": "dettagliato"}' | Out-File -Encoding ascii preferenze.json
+"Che ore sono?`nSpiegami in due frasi che cos'è una pipetta.`n/esci" | .\.venv\Scripts\python.exe -m assistente
+git checkout -- preferenze.json
+```
+
+```text
+[INFO] preferenze: resource utente://preferenze letta in 2.8 s: lingua=inglese, fuso=America/New_York, stile=dettagliato
+[INFO] instradamento: richiesta strumento ora_corrente {"fuso": "America/New_York"}
+[INFO] nodo_strumenti: ora_corrente -> mercoledì 2026-11-18T08:16:18-05:00 (America/New_York)
+Tu> Assistente> It is Wednesday, November 18, 2026, at 8:16:18 AM (America/New_York).
+Tu> Assistente> A pipette is a laboratory instrument used to accurately measure and transfer small volumes of liquid. It consists of a calibrated tube that allows precise dispensing of solutions, which is essential for various scientific procedures like mixing reagents or preparing samples.
+Tu> Alla prossima!
+```
+
+(Righe dei cataloghi MCP, delle note, di router, `nodo_llm` e revisore omesse.) La riga della lettura delle
+preferenze compare all'avvio, prima di ogni chiamata al modello. Sulla seconda domanda il router è arrivato al tetto
+dei token e ha passato la domanda all'agente, come descritto in «Router dell'ambito».
+
+**Da provare in Docker.** Il `Dockerfile` copia `preferenze_mcp/` e `preferenze.json` nell'immagine e `compose.yaml`
+monta il `preferenze.json` dell'host in sola lettura su `/app/preferenze.json`, così una modifica vale dalla sessione
+successiva senza `docker compose build`. La prova non è ancora stata eseguita: il 18/11/2026 Docker Desktop non si
+avviava (`Error response from daemon: Docker Desktop is unable to start`). La prova da fare è la stessa sequenza della
+pipe, con `docker compose run --rm -T -e LOG_LEVEL=INFO assistente` dopo `docker compose build`, modificando il file
+sull'host tra le due sessioni.
 
 ## Mostrare e nascondere i log
 
