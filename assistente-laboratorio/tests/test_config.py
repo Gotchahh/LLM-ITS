@@ -239,3 +239,18 @@ def test_leggi_riassunto_non_valido(tmp_path, contenuto):
 
 def test_riassunto_del_progetto():
     assert "nome" in leggi_riassunto(Path(__file__).resolve().parent.parent / "riassunto.txt")
+
+
+def test_il_revisore_non_giudica_la_lingua():
+    istruzioni = leggi_revisore(Path(__file__).resolve().parent.parent / "revisore.txt")
+    assert "La lingua della risposta non è mai un motivo per coerente=false" in istruzioni
+
+
+def test_preferenze_json_del_progetto_valido(caplog):
+    from zoneinfo import ZoneInfo
+
+    from assistente.preferenze import Preferenze, leggi_preferenze
+
+    testo = (Path(__file__).resolve().parent.parent / "preferenze.json").read_text(encoding="utf-8")
+    assert leggi_preferenze(testo, ZoneInfo("UTC")) == Preferenze("italiano", ZoneInfo("Europe/Rome"), "sintetico")
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

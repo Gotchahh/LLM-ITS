@@ -36,6 +36,7 @@ def ambiente_pulito(monkeypatch, tmp_path):
         monkeypatch.delenv(nome, raising=False)
     monkeypatch.setattr(avvio, "configura_log", lambda livello: None)
     monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
+    monkeypatch.setattr(avvio, "leggi_preferenze_mcp", lambda: '{"lingua": "inglese", "fuso": "America/New_York"}')
 
 
 def usa_flussi_finti(monkeypatch, ingresso: bytes = b""):
@@ -224,3 +225,38 @@ def test_main_riassunto_soglia_non_valida_uscita_1(monkeypatch):
     monkeypatch.setenv("RIASSUNTO_SOGLIA", "0")
     codice, errori = esegui_main_con_errore(monkeypatch)
     assert codice == 1 and errori.startswith("Errore: RIASSUNTO_SOGLIA") and "Traceback" not in errori
+
+
+def main_con_grafo_catturato(monkeypatch):
+    """Esegue `main()` con il modello e la chat finti e restituisce (codice, opzioni passate a `costruisci_grafo`)."""
+    usa_flussi_finti(monkeypatch)
+    monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
+    monkeypatch.setattr(avvio, "crea_modello", lambda config: object())
+    ricevute = []
+    monkeypatch.setattr(avvio, "costruisci_grafo", lambda *argomenti, **opzioni: ricevute.append(opzioni) or "grafo")
+    monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: None)
+    codice = avvio.main()
+    return codice, ricevute[0]
+
+
+def test_main_passa_al_grafo_le_preferenze_lette(monkeypatch):
+    for nome, valore in VALIDO.items():
+        monkeypatch.setenv(nome, valore)
+    codice, opzioni = main_con_grafo_catturato(monkeypatch)
+    assert codice == 0
+    assert "rispondi sempre in inglese" in opzioni["preferenze"] and "America/New_York" in opzioni["preferenze"]
+
+
+def test_main_preferenze_illeggibili_parte_con_i_predefiniti(monkeypatch, caplog):
+    for nome, valore in {**VALIDO, "APP_TIMEZONE": "Asia/Tokyo"}.items():
+        monkeypatch.setenv(nome, valore)
+
+    def lettura_fallita():
+        raise ErroreMCP("resource utente://preferenze non letta (python.exe -m preferenze_mcp): Connection closed")
+
+    monkeypatch.setattr(avvio, "leggi_preferenze_mcp", lettura_fallita)
+    codice, opzioni = main_con_grafo_catturato(monkeypatch)
+    assert codice == 0
+    assert "rispondi sempre in italiano" in opzioni["preferenze"] and "Asia/Tokyo" in opzioni["preferenze"]
+    assert "Stile:" not in opzioni["preferenze"]
+    assert any(m.startswith("preferenze: resource non disponibile (") for m in caplog.messages)

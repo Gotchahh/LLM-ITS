@@ -7,7 +7,7 @@ from pathlib import Path
 
 from assistente.calendario import crea_strumenti_calendario
 from assistente.cli import crea_indicatore_attesa, esegui_chat, prepara_terminale
-from assistente.client_mcp import ErroreMCP, carica_strumenti_mcp
+from assistente.client_mcp import ErroreMCP, carica_strumenti_mcp, leggi_preferenze_mcp
 from assistente.config import (
     ErroreConfigurazione,
     carica_configurazione,
@@ -28,16 +28,18 @@ from assistente.modello import (
     verifica_modello,
 )
 from assistente.note import crea_strumenti_note, servizio_raggiungibile
+from assistente.preferenze import blocco_preferenze, carica_preferenze
 from assistente.strumenti import crea_strumento_orologio
 
 logger = logging.getLogger("assistente")
 
 
 def main() -> int:
-    """Legge la configurazione, controlla il server e il modello, carica gli strumenti MCP, poi avvia la chat.
+    """Legge la configurazione, controlla il server e il modello, carica gli strumenti MCP, legge le preferenze
+    dell'utente dalla resource MCP, poi avvia la chat.
 
     Restituisce 1 se la configurazione non è valida, LM Studio non è raggiungibile
-    o il server MCP della calcolatrice non parte.
+    o un server MCP degli strumenti non parte. Preferenze non disponibili: valori predefiniti e WARNING, la chat parte.
     """
     prepara_terminale(sys.stdin, sys.stdout, sys.stderr)
     try:
@@ -52,6 +54,7 @@ def main() -> int:
     except (ErroreConfigurazione, ErroreServer, ErroreMCP) as errore:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1
+    preferenze = carica_preferenze(leggi_preferenze_mcp, config.fuso)
     if not servizio_raggiungibile(config.note_url):
         logger.warning(
             "servizio note non raggiungibile a %s: gli strumenti delle note risponderanno con un errore",
@@ -70,6 +73,7 @@ def main() -> int:
         riassunto_soglia=config.riassunto_soglia,
         riassunto_turni=config.riassunto_turni,
         modello_riassunto=crea_modello_riassunto(config),
+        preferenze=blocco_preferenze(preferenze),
     )
     esegui_chat(
         grafo,
