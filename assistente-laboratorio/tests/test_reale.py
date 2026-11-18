@@ -5,11 +5,12 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from assistente.calendario import crea_strumenti_calendario, leggi_data
-from assistente.client_mcp import carica_strumenti_mcp
+from assistente.client_mcp import carica_strumenti_mcp, leggi_preferenze_mcp
 from assistente.config import carica_configurazione, leggi_ambito, leggi_file_env, leggi_revisore, leggi_riassunto
 from assistente.convertitore import crea_strumento_convertitore
 from assistente.grafo import costruisci_grafo, esegui_turno, esegui_turno_con_riassunto
@@ -18,6 +19,7 @@ from assistente.riassunto import messaggi_per_il_riassunto
 from assistente.revisore import SCHEMA_REVISORE, e_indicazione, leggi_valutazione, messaggi_per_il_revisore
 from assistente.router import INIZIO_RIFIUTO
 from assistente.note import crea_strumenti_note
+from assistente.preferenze import Preferenze, blocco_preferenze, carica_preferenze
 from assistente.strumenti import crea_strumento_orologio
 
 pytestmark = pytest.mark.reale
@@ -32,8 +34,14 @@ def config():
     return carica_configurazione({**leggi_file_env(FILE_ENV), **os.environ})
 
 
-def crea_grafo(config, servizio_note, soglia, turni):
-    """Grafo collegato al modello reale, con gli stessi strumenti e nodi di `main` e il riassunto dato."""
+def preferenze_del_file(config):
+    """Il blocco delle preferenze come in `main`: file versionato letto dal server MCP vero."""
+    return blocco_preferenze(carica_preferenze(leggi_preferenze_mcp, config.fuso))
+
+
+def crea_grafo(config, servizio_note, soglia, turni, preferenze=None):
+    """Grafo collegato al modello reale, con gli stessi strumenti e nodi di `main`, il riassunto dato e le
+    preferenze date (predefinite: quelle del file, come in `main`)."""
     verifica_modello(config.modello, leggi_modelli_disponibili(config.base_url))
     strumenti = [
         crea_strumento_orologio(config.fuso),
@@ -50,6 +58,7 @@ def crea_grafo(config, servizio_note, soglia, turni):
         riassunto_soglia=soglia,
         riassunto_turni=turni,
         modello_riassunto=crea_modello_riassunto(config),
+        preferenze=preferenze if preferenze is not None else preferenze_del_file(config),
     )
 
 
@@ -240,3 +249,45 @@ def test_reale_riassunto_conserva_il_nome_di_una_presentazione_breve(config):
     )
     messaggi = messaggi_per_il_riassunto(leggi_riassunto(RADICE / "riassunto.txt"), "", trascrizione)
     assert "Ottavio" in crea_modello_riassunto(config).invoke(messaggi).text
+
+
+ROMA = ZoneInfo("Europe/Rome")
+DOMANDA_CENTRIFUGA = "Spiegami in due frasi a che cosa serve una centrifuga."
+
+
+def grafo_con_preferenze(config, servizio_note, preferenze):
+    return crea_grafo(config, servizio_note, config.riassunto_soglia, config.riassunto_turni,
+                      preferenze=blocco_preferenze(preferenze))
+
+
+def parole(testo):
+    return re.findall(r"\w+", testo.lower())
+
+
+def test_reale_preferenze_fuso(config, servizio_note):
+    grafo = grafo_con_preferenze(config, servizio_note, Preferenze("italiano", ZoneInfo("America/New_York"), "sintetico"))
+    cronologia = esegui_turno(grafo, [], "Che ore sono?")
+    richieste = [r for m in cronologia if m.type == "ai" for r in m.tool_calls if r["name"] == "ora_corrente"]
+    assert richieste and all(r["args"].get("fuso") == "America/New_York" for r in richieste)
+    risultato = next(m.content for m in cronologia if m.type == "tool" and m.name == "ora_corrente")
+    ore, minuti = re.search(r"T(\d{2}):(\d{2})", risultato).groups()
+    assert re.search(rf"\b0?{int(ore)}[:.]{minuti}\b", cronologia[-1].text)
+
+
+def test_reale_preferenze_lingua(config, servizio_note, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    grafo = grafo_con_preferenze(config, servizio_note, Preferenze("inglese", ROMA, "sintetico"))
+    cronologia = esegui_turno(grafo, [], DOMANDA_CENTRIFUGA)
+    risposta = parole(cronologia[-1].text)
+    assert len({"the", "and", "is", "to"} & set(risposta)) >= 2
+    assert not {"il", "che", "è", "una"} & set(risposta)
+    assert not any(e_indicazione(m) for m in cronologia)
+    assert any(m.startswith("revisore: coerente") for m in caplog.messages)
+
+
+def test_reale_preferenze_stile(config, servizio_note):
+    lunghezze = {}
+    for stile in ("sintetico", "dettagliato"):
+        grafo = grafo_con_preferenze(config, servizio_note, Preferenze("italiano", ROMA, stile))
+        lunghezze[stile] = len(parole(esegui_turno(grafo, [], DOMANDA_CENTRIFUGA)[-1].text))
+    assert lunghezze["dettagliato"] > lunghezze["sintetico"], lunghezze
