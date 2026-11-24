@@ -1,16 +1,22 @@
 """Interfaccia da terminale: ciclo di lettura, invocazione del grafo e stampa."""
 
 import logging
+from collections.abc import Callable
 
 from langgraph.errors import GraphRecursionError
 
+from assistente.client_mcp import DefinizionePrompt, ErroreMCP
 from assistente.config import LIVELLO_LOG_PREDEFINITO, ModalitaLog
 from assistente.grafo import LIMITE_PASSAGGI, RispostaNonValida, esegui_turno_con_riassunto
+from assistente.prompt import ErrorePrompt, compila_prompt, righe_elenco
 
 logger = logging.getLogger(__name__)
 
 COMANDO_ESCI = "/esci"
 COMANDO_LOG = "/log"
+COMANDO_PROMPTS = "/prompts"
+COMANDO_PROMPT = "/prompt"
+MESSAGGIO_PROMPT_NON_DISPONIBILI = "I prompt non sono disponibili: il server dei prompt non è partito all'avvio."
 MESSAGGIO_LOG_VISIBILI = "Log visibili. Scrivi /log per nasconderli."
 MESSAGGIO_LOG_NASCOSTI = "Log nascosti: solo dialogo. Scrivi /log per mostrarli."
 TESTO_ATTESA = "Ragionando..."
@@ -60,8 +66,15 @@ def prepara_terminale(*flussi) -> None:
 
 
 def esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None,
-                livello_log: str = LIVELLO_LOG_PREDEFINITO) -> None:
+                livello_log: str = LIVELLO_LOG_PREDEFINITO,
+                elenco_prompt: list[DefinizionePrompt] | None = None,
+                richiedi_prompt: Callable[[str, dict[str, str]], str] | None = None) -> None:
     """Legge le righe dell'utente, esegue un turno del grafo per ciascuna e stampa la risposta.
+
+    `/prompts` mostra l'elenco dei prompt; `/prompt nome arg=valore` chiede il testo al server con
+    `richiedi_prompt` e lo manda al grafo come una domanda scritta: nella cronologia va il testo compilato.
+    Una richiesta sbagliata stampa un errore senza chiamare il modello. Con `elenco_prompt` a `None` (server dei
+    prompt non partito) i due comandi rispondono che i prompt non sono disponibili.
 
     La cronologia e il riassunto dei turni più vecchi vivono solo in questa funzione, per la durata della
     sessione. Un turno fallito stampa un errore e viene scartato: cronologia e riassunto restano com'erano e la
@@ -80,23 +93,45 @@ def esegui_chat(grafo, server: str, leggi=input, scrivi=print, attesa=None,
             riga = leggi("Tu> ").lstrip("\ufeff").strip()
             if not riga:
                 continue
+            testo = riga
             if riga.startswith("/"):
-                comando = riga.lower()
-                if comando == COMANDO_ESCI:
-                    break
-                if comando == COMANDO_LOG:
-                    visibili = modalita_log.alterna()
-                    scrivi(MESSAGGIO_LOG_VISIBILI if visibili else MESSAGGIO_LOG_NASCOSTI)
+                # Solo la parola del comando va in minuscolo: nome del prompt e valori restano come scritti.
+                parola, *resto = riga.split(maxsplit=1)
+                if parola.lower() == COMANDO_PROMPT:
+                    if elenco_prompt is None:
+                        scrivi(MESSAGGIO_PROMPT_NON_DISPONIBILI)
+                        continue
+                    try:
+                        testo = compila_prompt(resto[0] if resto else "", elenco_prompt, richiedi_prompt)
+                    except (ErrorePrompt, ErroreMCP) as errore:
+                        scrivi(f"Errore: {errore}")
+                        continue
                 else:
-                    scrivi(f"Comando sconosciuto. Comandi disponibili: {COMANDO_ESCI}, {COMANDO_LOG}")
-                continue
+                    comando = riga.lower()
+                    if comando == COMANDO_ESCI:
+                        break
+                    if comando == COMANDO_LOG:
+                        visibili = modalita_log.alterna()
+                        scrivi(MESSAGGIO_LOG_VISIBILI if visibili else MESSAGGIO_LOG_NASCOSTI)
+                    elif comando == COMANDO_PROMPTS:
+                        if elenco_prompt is None:
+                            scrivi(MESSAGGIO_PROMPT_NON_DISPONIBILI)
+                        else:
+                            for riga_elenco in righe_elenco(elenco_prompt):
+                                scrivi(riga_elenco)
+                    else:
+                        scrivi(
+                            f"Comando sconosciuto. Comandi disponibili: {COMANDO_ESCI}, {COMANDO_LOG}, "
+                            f"{COMANDO_PROMPTS}, {COMANDO_PROMPT}"
+                        )
+                    continue
             # La scritta di attesa si decide a ogni turno, quindi segue i cambi fatti con /log.
             usa_attesa = attesa is not None and not modalita_log.visibili
             try:
                 if usa_attesa:
                     attesa.mostra()
                 try:
-                    cronologia, riassunto = esegui_turno_con_riassunto(grafo, cronologia, riassunto, riga)
+                    cronologia, riassunto = esegui_turno_con_riassunto(grafo, cronologia, riassunto, testo)
                 finally:
                     if usa_attesa:
                         attesa.nascondi()

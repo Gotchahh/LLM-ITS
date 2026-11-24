@@ -174,6 +174,7 @@ def test_leggi_ambito_non_valido(tmp_path, contenuto):
 def test_ambito_del_progetto():
     testo = leggi_ambito(Path(__file__).resolve().parent.parent / "ambito.txt")
     assert "laboratorio" in testo and "fuori_ambito" in testo and "conversazione" in testo
+    assert "domande sulla conversazione in corso e richieste di riassumerla" in testo
 
 
 def test_configurazione_del_revisore():

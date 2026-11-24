@@ -9,7 +9,9 @@ from conftest import VALIDO, FlussoDiTesto
 from langchain_core.tools import StructuredTool
 
 import assistente.__main__ as avvio
-from assistente.client_mcp import ErroreMCP
+from assistente.client_mcp import ArgomentoPrompt, DefinizionePrompt, ErroreMCP
+
+ELENCO_PROMPT = [DefinizionePrompt("spiega", "Spiega.", (ArgomentoPrompt("argomento", "", True),))]
 
 
 @pytest.fixture(autouse=True)
@@ -37,6 +39,7 @@ def ambiente_pulito(monkeypatch, tmp_path):
     monkeypatch.setattr(avvio, "configura_log", lambda livello: None)
     monkeypatch.setattr(avvio, "carica_strumenti_mcp", lambda: [])
     monkeypatch.setattr(avvio, "leggi_preferenze_mcp", lambda: '{"lingua": "inglese", "fuso": "America/New_York"}')
+    monkeypatch.setattr(avvio, "leggi_elenco_prompt", lambda: ELENCO_PROMPT)
 
 
 def usa_flussi_finti(monkeypatch, ingresso: bytes = b""):
@@ -260,3 +263,33 @@ def test_main_preferenze_illeggibili_parte_con_i_predefiniti(monkeypatch, caplog
     assert "rispondi sempre in italiano" in opzioni["preferenze"] and "Asia/Tokyo" in opzioni["preferenze"]
     assert "Stile:" not in opzioni["preferenze"]
     assert any(m.startswith("preferenze: resource non disponibile (") for m in caplog.messages)
+
+
+def main_con_chat_catturata(monkeypatch):
+    """Esegue `main()` con il modello e il grafo finti e restituisce (codice, opzioni passate a `esegui_chat`)."""
+    for nome, valore in VALIDO.items():
+        monkeypatch.setenv(nome, valore)
+    usa_flussi_finti(monkeypatch)
+    monkeypatch.setattr(avvio, "leggi_modelli_disponibili", lambda url: [VALIDO["LMSTUDIO_MODEL"]])
+    monkeypatch.setattr(avvio, "crea_modello", lambda config: object())
+    monkeypatch.setattr(avvio, "costruisci_grafo", lambda *argomenti, **opzioni: "grafo")
+    ricevute = []
+    monkeypatch.setattr(avvio, "esegui_chat", lambda grafo, server, **opzioni: ricevute.append(opzioni))
+    codice = avvio.main()
+    return codice, ricevute[0]
+
+
+def test_main_passa_alla_chat_l_elenco_e_la_richiesta_dei_prompt(monkeypatch):
+    codice, opzioni = main_con_chat_catturata(monkeypatch)
+    assert codice == 0
+    assert opzioni["elenco_prompt"] == ELENCO_PROMPT and opzioni["richiedi_prompt"] is avvio.richiedi_prompt
+
+
+def test_main_elenco_dei_prompt_illeggibile_la_chat_parte_senza_prompt(monkeypatch, caplog):
+    def lettura_fallita():
+        raise ErroreMCP("elenco dei prompt non letto dal server MCP prompt (python.exe -m prompt_mcp): x")
+
+    monkeypatch.setattr(avvio, "leggi_elenco_prompt", lettura_fallita)
+    codice, opzioni = main_con_chat_catturata(monkeypatch)
+    assert codice == 0 and opzioni["elenco_prompt"] is None
+    assert any(m.startswith("prompt: elenco non disponibile (") for m in caplog.messages)

@@ -103,11 +103,12 @@ class AttesaFinta:
         self.stampato.append("[nascondi]")
 
 
-def chat(grafo, righe, con_attesa=False, livello_log="INFO"):
+def chat(grafo, righe, con_attesa=False, livello_log="INFO", **opzioni):
     """Esegue la chat con le `righe` date (poi fine input) e restituisce le stringhe stampate.
 
     Con `con_attesa=True` usa un indicatore di attesa finto, che scrive nella stessa lista.
     `livello_log` è il livello d'avvio dei log, da cui dipende la modalità iniziale di `/log`.
+    Le altre `opzioni` (per esempio `elenco_prompt`, `richiedi_prompt`) vanno a `esegui_chat`.
     """
     da_leggere = list(righe)
     stampato = []
@@ -119,7 +120,7 @@ def chat(grafo, righe, con_attesa=False, livello_log="INFO"):
 
     attesa = AttesaFinta(stampato) if con_attesa else None
     esegui_chat(grafo, SERVER_FINTO, leggi=leggi, scrivi=stampato.append, attesa=attesa,
-                livello_log=livello_log)
+                livello_log=livello_log, **opzioni)
     return stampato
 
 
