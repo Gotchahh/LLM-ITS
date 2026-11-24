@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import pytest
 from conftest import VALIDO
@@ -8,6 +9,9 @@ from assistente.config import (
     ModalitaLog,
     carica_configurazione,
     configura_log,
+    leggi_ambito,
+    leggi_revisore,
+    leggi_riassunto,
     leggi_file_env,
 )
 
@@ -133,3 +137,121 @@ def test_modalita_log_tocca_solo_i_log_dell_applicazione(log_isolati):
     ModalitaLog("WARNING").alterna()
     assert logging.getLogger("assistente.grafo").isEnabledFor(logging.INFO)
     assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
+
+
+def test_indirizzo_delle_note():
+    assert carica_configurazione(VALIDO).note_url == "http://localhost:8000"
+    assert carica_configurazione({**VALIDO, "NOTE_API_URL": " "}).note_url == "http://localhost:8000"
+    assert carica_configurazione({**VALIDO, "NOTE_API_URL": "http://note:8000/"}).note_url == "http://note:8000"
+    with pytest.raises(ErroreConfigurazione, match="NOTE_API_URL"):
+        carica_configurazione({**VALIDO, "NOTE_API_URL": "note:8000"})
+
+
+def test_file_dell_ambito():
+    assert carica_configurazione(VALIDO).ambito_file == Path("ambito.txt")
+    assert carica_configurazione({**VALIDO, "AMBITO_FILE": " "}).ambito_file == Path("ambito.txt")
+    assert carica_configurazione({**VALIDO, "AMBITO_FILE": " altro.txt "}).ambito_file == Path("altro.txt")
+
+
+def test_leggi_ambito(tmp_path):
+    valido = tmp_path / "ambito.txt"
+    valido.write_text("  testo \n", encoding="utf-8")
+    assert leggi_ambito(valido) == "testo"
+
+
+@pytest.mark.parametrize("contenuto", [None, "   \n", "utf16"])
+def test_leggi_ambito_non_valido(tmp_path, contenuto):
+    percorso = tmp_path / "ambito.txt"
+    if contenuto == "utf16":
+        percorso.write_text("ambito", encoding="utf-16")
+    elif contenuto is not None:
+        percorso.write_text(contenuto, encoding="utf-8")
+    with pytest.raises(ErroreConfigurazione) as errore:
+        leggi_ambito(percorso)
+    assert "AMBITO_FILE" in str(errore.value) and "ambito.txt" in str(errore.value)
+
+
+def test_ambito_del_progetto():
+    testo = leggi_ambito(Path(__file__).resolve().parent.parent / "ambito.txt")
+    assert "laboratorio" in testo and "fuori_ambito" in testo and "conversazione" in testo
+    assert "domande sulla conversazione in corso e richieste di riassumerla" in testo
+
+
+def test_configurazione_del_revisore():
+    c = carica_configurazione(VALIDO)
+    assert (c.revisore_file, c.revisioni_max) == (Path("revisore.txt"), 2)
+    assert carica_configurazione({**VALIDO, "REVISORE_FILE": " r.txt "}).revisore_file == Path("r.txt")
+    assert carica_configurazione({**VALIDO, "REVISIONI_MAX": "0"}).revisioni_max == 0
+    assert carica_configurazione({**VALIDO, "REVISIONI_MAX": " 3 "}).revisioni_max == 3
+
+
+@pytest.mark.parametrize("valore", ["due", "-1", "1.5"])
+def test_revisioni_max_non_valido(valore):
+    with pytest.raises(ErroreConfigurazione, match="REVISIONI_MAX"):
+        carica_configurazione({**VALIDO, "REVISIONI_MAX": valore})
+
+
+@pytest.mark.parametrize("contenuto", [None, "  \n"])
+def test_leggi_revisore_non_valido(tmp_path, contenuto):
+    percorso = tmp_path / "revisore.txt"
+    if contenuto is not None:
+        percorso.write_text(contenuto, encoding="utf-8")
+    with pytest.raises(ErroreConfigurazione) as errore:
+        leggi_revisore(percorso)
+    assert "REVISORE_FILE" in str(errore.value) and "revisore" in str(errore.value)
+
+
+def test_revisore_del_progetto():
+    assert "coerente" in leggi_revisore(Path(__file__).resolve().parent.parent / "revisore.txt")
+
+
+def test_configurazione_del_riassunto():
+    c = carica_configurazione(VALIDO)
+    assert (c.riassunto_file, c.riassunto_soglia, c.riassunto_turni) == (Path("riassunto.txt"), 20, 2)
+    assert carica_configurazione({**VALIDO, "RIASSUNTO_FILE": " r.txt "}).riassunto_file == Path("r.txt")
+    assert carica_configurazione({**VALIDO, "RIASSUNTO_SOGLIA": " 6 "}).riassunto_soglia == 6
+    assert carica_configurazione({**VALIDO, "RIASSUNTO_TURNI": "1"}).riassunto_turni == 1
+
+
+@pytest.mark.parametrize(
+    "variabile, valore",
+    [
+        ("RIASSUNTO_SOGLIA", "0"),
+        ("RIASSUNTO_SOGLIA", "-3"),
+        ("RIASSUNTO_SOGLIA", "venti"),
+        ("RIASSUNTO_TURNI", "0"),
+        ("RIASSUNTO_TURNI", "due"),
+    ],
+)
+def test_riassunto_intero_non_valido(variabile, valore):                     # Review Focus 5
+    with pytest.raises(ErroreConfigurazione, match=variabile):
+        carica_configurazione({**VALIDO, variabile: valore})
+
+
+@pytest.mark.parametrize("contenuto", [None, "  \n"])
+def test_leggi_riassunto_non_valido(tmp_path, contenuto):
+    percorso = tmp_path / "riassunto.txt"
+    if contenuto is not None:
+        percorso.write_text(contenuto, encoding="utf-8")
+    with pytest.raises(ErroreConfigurazione) as errore:
+        leggi_riassunto(percorso)
+    assert "RIASSUNTO_FILE" in str(errore.value) and "riassunto" in str(errore.value)
+
+
+def test_riassunto_del_progetto():
+    assert "nome" in leggi_riassunto(Path(__file__).resolve().parent.parent / "riassunto.txt")
+
+
+def test_il_revisore_non_giudica_la_lingua():
+    istruzioni = leggi_revisore(Path(__file__).resolve().parent.parent / "revisore.txt")
+    assert "La lingua della risposta non è mai un motivo per coerente=false" in istruzioni
+
+
+def test_preferenze_json_del_progetto_valido(caplog):
+    from zoneinfo import ZoneInfo
+
+    from assistente.preferenze import Preferenze, leggi_preferenze
+
+    testo = (Path(__file__).resolve().parent.parent / "preferenze.json").read_text(encoding="utf-8")
+    assert leggi_preferenze(testo, ZoneInfo("UTC")) == Preferenze("italiano", ZoneInfo("Europe/Rome"), "sintetico")
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

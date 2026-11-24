@@ -3,9 +3,9 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import ModelloFinto, chat
-from langchain_core.messages import AIMessage
-from langchain_core.tools import tool
+from conftest import ModelloFinto, chat, decisione, porta_libera, valutazione
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.tools import StructuredTool, ToolException, tool
 from langgraph.errors import GraphRecursionError
 
 from assistente.grafo import (
@@ -14,7 +14,11 @@ from assistente.grafo import (
     RispostaNonValida,
     costruisci_grafo,
     esegui_turno,
+    esegui_turno_con_riassunto,
 )
+from assistente.calendario import crea_strumenti_calendario
+from assistente.convertitore import crea_strumento_convertitore
+from assistente.note import crea_strumenti_note
 from assistente.strumenti import crea_strumento_orologio
 
 orologio = crea_strumento_orologio(
@@ -112,7 +116,7 @@ def test_il_turno_e_invocato_con_il_limite_di_passaggi():
 
     spia = GrafoSpia()
     esegui_turno(spia, [], "ciao")
-    assert LIMITE_PASSAGGI == 10 and spia.config == {"recursion_limit": LIMITE_PASSAGGI}
+    assert LIMITE_PASSAGGI == 21 and spia.config == {"recursion_limit": LIMITE_PASSAGGI}
 
 
 def test_percorso_con_strumento(caplog):
@@ -167,10 +171,530 @@ def test_limite_di_passaggi():
 def test_limite_di_passaggi_in_chat():
     finto = ModelloFinto([chiamata(f"c{i}") for i in range(20)] + [AIMessage("Eccomi")])
     uscita = chat(costruisci_grafo(finto, [orologio]), ["D1", "/esci"])
-    assert "Errore: limite di 10 passaggi raggiunto. Turno annullato." in uscita
+    assert f"Errore: limite di {LIMITE_PASSAGGI} passaggi raggiunto. Turno annullato." in uscita
 
 
 def test_risposta_con_testo_e_richiesta_va_agli_strumenti():
     mista = AIMessage("Controllo l'orologio.", tool_calls=[{"name": "ora_corrente", "args": {}, "id": "x"}])
     nuova = esegui_turno(costruisci_grafo(ModelloFinto([mista, AIMessage("ok")]), [orologio]), [], "?")
     assert nuova[2].type == "tool"
+
+
+def solleva_tool_exception(espressione: str) -> str:
+    raise ToolException("divisione per zero")
+
+
+calcola_finta = StructuredTool.from_function(func=solleva_tool_exception, name="calcola", description="prova")
+
+
+def richiesta_calcolo(id, espressione="1/0"):
+    return AIMessage("", tool_calls=[{"name": "calcola", "args": {"espressione": espressione}, "id": id}])
+
+
+def test_errore_dello_strumento_diventa_tool_message_d_errore(caplog):
+    finto = ModelloFinto([richiesta_calcolo("k1"), AIMessage("Non si può dividere per zero.")])
+    nuova = esegui_turno(costruisci_grafo(finto, [calcola_finta]), [], "Quanto fa 1/0?")
+    assert [m.type for m in nuova] == ["human", "ai", "tool", "ai"]
+    assert (nuova[2].content, nuova[2].status, nuova[2].tool_call_id, nuova[2].name) == \
+        ("Errore: divisione per zero", "error", "k1", "calcola")
+    assert len(finto.chiamate) == 2 and finto.chiamate[1][-1].type == "tool"
+    assert "nodo_strumenti: errore dello strumento calcola: divisione per zero" in \
+        [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+
+
+def test_le_altre_eccezioni_dello_strumento_annullano_il_turno():
+    def rotto(espressione: str) -> str:
+        raise RuntimeError("difetto")
+    strumento = StructuredTool.from_function(func=rotto, name="calcola", description="prova")
+    with pytest.raises(RuntimeError):
+        esegui_turno(costruisci_grafo(ModelloFinto([richiesta_calcolo("k1")]), [strumento]), [], "?")
+
+
+def test_un_errore_non_blocca_le_altre_richieste():
+    doppia = AIMessage("", tool_calls=[{"name": "calcola", "args": {"espressione": "1/0"}, "id": "a"},
+                                       {"name": "ora_corrente", "args": {}, "id": "b"}])
+    finto = ModelloFinto([doppia, AIMessage("ok")])
+    nuova = esegui_turno(costruisci_grafo(finto, [calcola_finta, orologio]), [], "?")
+    risposte = [m for m in nuova if m.type == "tool"]
+    assert [(m.tool_call_id, m.status) for m in risposte] == [("a", "error"), ("b", "success")]
+    assert risposte[1].content == "lunedì 2026-10-26T16:42:10+01:00 (Europe/Rome)"
+
+
+def test_il_prompt_chiede_la_calcolatrice_e_conserva_l_orologio():
+    assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
+    assert "senza inventare un risultato" in PROMPT_DI_SISTEMA
+    assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
+
+
+def test_il_prompt_chiede_il_convertitore():
+    assert "chiama lo strumento converti" in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
+    assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
+    assert "senza inventare un risultato" in PROMPT_DI_SISTEMA
+
+
+def richiesta_conversione(id, args):
+    return AIMessage("", tool_calls=[{"name": "converti", "args": args, "id": id}])
+
+
+def test_percorso_con_il_convertitore(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([
+        richiesta_conversione("v1", {"valore": 25, "da": "m", "a": "km"}),
+        AIMessage("25 metri sono 0,025 km."),
+    ])
+    nuova = esegui_turno(costruisci_grafo(finto, [crea_strumento_convertitore()]), [], "Quanti km sono 25 metri?")
+    assert [m.type for m in nuova] == ["human", "ai", "tool", "ai"]
+    assert nuova[2].tool_call_id == "v1"
+    assert nuova[2].content == "25 m = 0,025 km" and nuova[2].status == "success"
+    assert "nodo_strumenti: converti -> 25 m = 0,025 km" in caplog.messages
+
+
+@pytest.mark.parametrize("args, atteso", [
+    ({"valore": 5, "da": "kg", "a": "m"}, "peso"),
+    ({"valore": "tanti", "da": "m", "a": "km"}, "numero"),
+])
+def test_conversione_impossibile_diventa_errore(args, atteso):
+    finto = ModelloFinto([richiesta_conversione("v2", args), AIMessage("Non si può.")])
+    nuova = esegui_turno(costruisci_grafo(finto, [crea_strumento_convertitore()]), [], "converti")
+    assert nuova[2].tool_call_id == "v2" and nuova[2].status == "error"
+    assert nuova[2].content.startswith("Errore: ") and atteso in nuova[2].content
+
+
+def test_il_prompt_chiede_gli_strumenti_del_calendario():
+    for testo in ["giorni_tra", "sposta_data", "giorno_settimana", "pasqua", "AAAA-MM-GG"]:
+        assert testo in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento converti" in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
+    assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
+
+
+def strumenti_del_calendario():
+    return crea_strumenti_calendario(ZoneInfo("Europe/Rome"), adesso=lambda: datetime(2026, 11, 3, 10, 0, tzinfo=UTC))
+
+
+def richiesta_calendario(id, nome, args):
+    return AIMessage("", tool_calls=[{"name": nome, "args": args, "id": id}])
+
+
+def test_percorso_con_il_calendario(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([
+        richiesta_calendario("d1", "giorni_tra", {"data": "12-25"}),
+        AIMessage("Mancano 52 giorni."),
+    ])
+    nuova = esegui_turno(costruisci_grafo(finto, strumenti_del_calendario()), [], "Quanti giorni a Natale?")
+    assert [m.type for m in nuova] == ["human", "ai", "tool", "ai"]
+    assert nuova[2].tool_call_id == "d1" and nuova[2].status == "success"
+    assert nuova[2].content.endswith("mancano 52 giorni")
+    assert any(m.startswith("nodo_strumenti: giorni_tra -> ") for m in caplog.messages)
+
+
+@pytest.mark.parametrize("nome, args, atteso", [
+    ("pasqua", {"anno": 1500}, "1583"),
+    ("giorni_tra", {"data": "2026-02-30"}, "non valida"),
+    ("sposta_data", {"giorni": 2.5}, "giorni"),
+])
+def test_errori_del_calendario_diventano_tool_message_d_errore(nome, args, atteso):
+    finto = ModelloFinto([richiesta_calendario("d2", nome, args), AIMessage("Non si può.")])
+    nuova = esegui_turno(costruisci_grafo(finto, strumenti_del_calendario()), [], "?")
+    assert nuova[2].tool_call_id == "d2" and nuova[2].status == "error"
+    assert nuova[2].content.startswith("Errore: ") and atteso in nuova[2].content
+
+
+def test_il_prompt_chiede_gli_strumenti_delle_note():
+    for testo in ["salva_nota", "elenca_note", "cancella_nota", "giorni_tra"]:
+        assert testo in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento converti" in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
+    assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
+
+
+def richiesta_nota(id):
+    return AIMessage("", tool_calls=[{"name": "salva_nota", "args": {"testo": "calibrare il microscopio 2"}, "id": id}])
+
+
+def test_percorso_con_le_note(servizio_note, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([richiesta_nota("n1"), AIMessage("Fatto.")])
+    strumenti = crea_strumenti_note(servizio_note, ZoneInfo("Europe/Rome"))
+    nuova = esegui_turno(costruisci_grafo(finto, strumenti), [], "Segnati il microscopio")
+    assert nuova[2].tool_call_id == "n1" and nuova[2].status == "success" and "salvata" in nuova[2].content
+    assert any(m.startswith("nodo_strumenti: salva_nota -> ") for m in caplog.messages)
+
+
+def test_servizio_note_spento_diventa_errore():
+    finto = ModelloFinto([richiesta_nota("n2"), AIMessage("Non posso.")])
+    strumenti = crea_strumenti_note(f"http://127.0.0.1:{porta_libera()}", ZoneInfo("Europe/Rome"))
+    nuova = esegui_turno(costruisci_grafo(finto, strumenti), [], "Segnati il microscopio")
+    assert nuova[2].status == "error" and "non raggiungibile" in nuova[2].content
+
+
+def test_il_prompt_chiede_il_catalogo():
+    for testo in ["cerca_apparecchi", "dettaglio_apparecchio", "elenca_apparecchi", "giorni_tra", "salva_nota"]:
+        assert testo in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento converti" in PROMPT_DI_SISTEMA
+    assert "chiama lo strumento calcola" in PROMPT_DI_SISTEMA
+    assert "chiama sempre lo strumento ora_corrente" in PROMPT_DI_SISTEMA
+
+
+AMBITO = "Ambito di prova: scienze e laboratorio."
+
+
+def test_in_ambito_passa_all_agente(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([AIMessage("Ciao!")], decisioni=[decisione("conversazione", "saluto")])
+    nuova = esegui_turno(costruisci_grafo(finto, [], AMBITO), [], "ciao")
+    assert [m.type for m in nuova] == ["human", "ai"] and nuova[-1].text == "Ciao!"
+    assert any(m.startswith("router: conversazione (saluto) in ") for m in caplog.messages)
+    assert len(finto.chiamate) == 1
+    assert finto.opzioni_router == [{"method": "json_schema", "include_raw": True}]
+
+
+def test_fuori_ambito_rifiuta_senza_agente(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([], decisioni=[decisione("fuori_ambito", "richiesta di una poesia")])
+    nuova = esegui_turno(costruisci_grafo(finto, [crea_strumento_convertitore()], AMBITO), [], "una poesia")
+    assert [m.type for m in nuova] == ["human", "ai"]
+    assert nuova[-1].text == "Posso aiutarti solo con domande scientifiche o sul laboratorio: richiesta di una poesia."
+    assert finto.chiamate == []
+    assert any(m.startswith("router: fuori ambito (richiesta di una poesia) in ") for m in caplog.messages)
+    assert "nodo_rifiuto: domanda fuori ambito" in caplog.messages
+    assert not any(m.startswith(("nodo_llm", "nodo_strumenti")) for m in caplog.messages)
+
+
+def test_decisione_illeggibile_passa_all_agente():
+    illeggibile = {"raw": None, "parsed": None, "parsing_error": ValueError("JSON rotto")}
+    finto = ModelloFinto([AIMessage("Risposta")], decisioni=[illeggibile])
+    nuova = esegui_turno(costruisci_grafo(finto, [], AMBITO), [], "?")
+    assert nuova[-1].text == "Risposta"
+
+
+def test_eccezione_del_router_passa_all_agente(caplog):
+    finto = ModelloFinto([AIMessage("Risposta")], decisioni=[RuntimeError("limite di lunghezza")])
+    nuova = esegui_turno(costruisci_grafo(finto, [], AMBITO), [], "?")
+    assert nuova[-1].text == "Risposta"
+    assert any(r.levelno == logging.WARNING and "router: errore (RuntimeError), la domanda passa" in r.getMessage()
+               for r in caplog.records)
+
+
+def test_turno_dopo_un_rifiuto():
+    finto = ModelloFinto([AIMessage("Il pH misura l'acidità.")], decisioni=[
+        decisione("fuori_ambito", "sport"), decisione("conversazione", "chimica")])
+    grafo = costruisci_grafo(finto, [], AMBITO)
+    cronologia = esegui_turno(grafo, [], "chi vince il campionato?")
+    cronologia = esegui_turno(grafo, cronologia, "cos'è il pH?")
+    assert [m.type for m in cronologia] == ["human", "ai", "human", "ai"]
+    assert cronologia[-1].text == "Il pH misura l'acidità."
+
+
+def test_il_router_riceve_l_ambito_e_non_i_messaggi_degli_strumenti():
+    finto = ModelloFinto([chiamata("c1"), AIMessage("Sono le 16:42."), AIMessage("Prego!")],
+                         decisioni=[decisione("conversazione", "ora"), decisione("conversazione", "grazie")])
+    grafo = costruisci_grafo(finto, [orologio], AMBITO)
+    cronologia = esegui_turno(grafo, [], "Che ore sono?")
+    esegui_turno(grafo, cronologia, "grazie")
+    secondo = finto.chiamate_router[1]
+    assert secondo[0].type == "system" and AMBITO in secondo[0].text
+    assert [m.type for m in secondo[1:]] == ["human", "ai", "human"]
+
+
+def test_senza_ambito_nessun_router():
+    finto = ModelloFinto([AIMessage("Ciao!")])
+    esegui_turno(costruisci_grafo(finto, []), [], "ciao")
+    assert finto.chiamate_router == [] and finto.opzioni_router == []
+
+
+def test_quattro_giri_di_strumenti_con_il_router():
+    finto = ModelloFinto([chiamata(f"c{i}") for i in range(4)] + [AIMessage("Fatto")],
+                         decisioni=[decisione("conversazione", "ora")])
+    nuova = esegui_turno(costruisci_grafo(finto, [orologio], AMBITO), [], "?")
+    assert nuova[-1].text == "Fatto"
+
+
+def test_modello_router_separato():
+    agente = ModelloFinto([AIMessage("Ciao!")])
+    router = ModelloFinto([], decisioni=[decisione("conversazione", "saluto")])
+    esegui_turno(costruisci_grafo(agente, [], AMBITO, router), [], "ciao")
+    assert len(router.chiamate_router) == 1 and agente.chiamate_router == []
+
+
+REVISORE = "Istruzioni del revisore di prova."
+DOMANDA = "Quanti giorni mancano a Natale e che giorno della settimana sarà?"
+
+
+def test_revisore_approva_subito(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([AIMessage("Mancano 46 giorni, venerdì.")], valutazioni=[valutazione(True, "completa")])
+    nuova = esegui_turno(costruisci_grafo(finto, [], revisore=REVISORE), [], DOMANDA)
+    assert [m.type for m in nuova] == ["human", "ai"] and len(finto.chiamate) == 1
+    assert len(finto.chiamate_revisore) == 1 and finto.chiamate_revisore[0][0].text == REVISORE
+    assert any(m.startswith("revisore: coerente (completa) in ") for m in caplog.messages)
+
+
+def test_revisore_rifiuta_una_volta(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    finto = ModelloFinto([AIMessage("Mancano 46 giorni."), AIMessage("Mancano 46 giorni; sarà venerdì.")],
+                         valutazioni=[valutazione(False, "manca il giorno della settimana"), valutazione(True, "ok")])
+    nuova = esegui_turno(costruisci_grafo(finto, [], revisore=REVISORE), [], DOMANDA)
+    assert [m.type for m in nuova] == ["human", "ai"] and nuova[-1].text == "Mancano 46 giorni; sarà venerdì."
+    secondo = finto.chiamate[1]
+    assert "manca il giorno della settimana" in secondo[-1].text and DOMANDA in secondo[-1].text
+    assert any("revisione 1 di 2" in m for m in caplog.messages)
+    assert "nodo_pulizia: rimossi 2 messaggi di revisione" in caplog.messages
+
+
+def test_revisore_rifiuta_sempre(caplog):
+    finto = ModelloFinto([AIMessage(f"Bozza {i}") for i in range(3)],
+                         valutazioni=[valutazione(False, "incompleta")] * 3)
+    nuova = esegui_turno(costruisci_grafo(finto, [], revisore=REVISORE), [], DOMANDA)
+    assert len(finto.chiamate) == 3 and len(finto.chiamate_revisore) == 3
+    assert [m.type for m in nuova] == ["human", "ai"] and nuova[-1].text == "Bozza 2"
+    assert any(r.levelno == logging.WARNING and "limite di revisioni raggiunto" in r.getMessage() for r in caplog.records)
+
+
+def test_revisioni_max_zero():
+    finto = ModelloFinto([AIMessage("Bozza")], valutazioni=[valutazione(False, "incompleta")])
+    nuova = esegui_turno(costruisci_grafo(finto, [], revisore=REVISORE, revisioni_max=0), [], DOMANDA)
+    assert nuova[-1].text == "Bozza" and len(finto.chiamate) == 1 and len(finto.chiamate_revisore) == 1
+
+
+@pytest.mark.parametrize("voce, avviso", [
+    (RuntimeError("limite di lunghezza"), "revisore: errore (RuntimeError), la risposta è approvata"),
+    ({"raw": None, "parsed": None, "parsing_error": ValueError("x")}, "revisore: valutazione illeggibile, la risposta è approvata"),
+])
+def test_errore_e_valutazione_illeggibile_approvano(caplog, voce, avviso):
+    finto = ModelloFinto([AIMessage("Risposta")], valutazioni=[voce])
+    nuova = esegui_turno(costruisci_grafo(finto, [], revisore=REVISORE), [], DOMANDA)
+    assert nuova[-1].text == "Risposta" and len(finto.chiamate) == 1
+    assert avviso in [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+
+def test_revisione_dopo_gli_strumenti():
+    finto = ModelloFinto([chiamata("c1"), AIMessage("Sono le 16:42."), AIMessage("Sono le 16:42 di lunedì.")],
+                         valutazioni=[valutazione(False, "manca il giorno"), valutazione(True, "ok")])
+    nuova = esegui_turno(costruisci_grafo(finto, [orologio], revisore=REVISORE), [], "Che ore sono e che giorno è?")
+    assert [m.type for m in nuova] == ["human", "ai", "tool", "ai"]
+    assert nuova[1].tool_calls and nuova[2].tool_call_id == "c1" and nuova[-1].text == "Sono le 16:42 di lunedì."
+
+
+def test_due_turni_con_revisione():
+    finto = ModelloFinto([AIMessage("R1 bozza"), AIMessage("R1"), AIMessage("R2")],
+                         valutazioni=[valutazione(False, "incompleta"), valutazione(True, "ok"), valutazione(True, "ok")])
+    grafo = costruisci_grafo(finto, [], revisore=REVISORE)
+    cronologia = esegui_turno(grafo, [], "D1")
+    cronologia = esegui_turno(grafo, cronologia, "D2")
+    assert [m.text for m in cronologia] == ["D1", "R1", "D2", "R2"]
+    assert "D2" in finto.chiamate_revisore[-1][1].text
+    assert [m.text for m in finto.chiamate[-1]][1:] == ["D1", "R1", "D2"]
+
+
+def test_rifiuto_del_router_senza_revisore():
+    finto = ModelloFinto([], decisioni=[decisione("fuori_ambito", "poesia")])
+    esegui_turno(costruisci_grafo(finto, [], AMBITO, revisore=REVISORE), [], "una poesia")
+    assert finto.chiamate_revisore == [] and finto.chiamate == []
+
+
+def test_senza_revisore_nessuna_revisione():
+    finto = ModelloFinto([AIMessage("Ciao!")])
+    esegui_turno(costruisci_grafo(finto, []), [], "ciao")
+    assert finto.chiamate_revisore == []
+
+
+RIASSUMI = "RIASSUMI"
+
+
+def turni_precedenti(n):
+    """`n` turni semplici già conclusi: D1, R1, D2, R2, ..."""
+    return [m for i in range(1, n + 1) for m in (HumanMessage(f"D{i}"), AIMessage(f"R{i}"))]
+
+
+def grafo_con_riassunto(agente, riassunto, strumenti=(), soglia=20, turni=2, **altri):
+    return costruisci_grafo(agente, list(strumenti), modello_router=riassunto, riassunto_istruzioni=RIASSUMI,
+                            riassunto_soglia=soglia, riassunto_turni=turni, **altri)
+
+
+def test_riassunto_sotto_la_soglia_non_chiama_il_modello(caplog):
+    caplog.set_level(logging.DEBUG, logger="assistente")
+    riassunto = ModelloFinto([])
+    vecchia = turni_precedenti(3)
+    nuova, testo = esegui_turno_con_riassunto(
+        grafo_con_riassunto(ModelloFinto([AIMessage("R4")]), riassunto), vecchia, "", "D4")
+    assert riassunto.chiamate == [] and testo == ""
+    assert [m.text for m in nuova] == ["D1", "R1", "D2", "R2", "D3", "R3", "D4", "R4"]
+    assert "riassunto: 7 messaggi, sotto la soglia di 20" in caplog.messages
+
+
+def test_riassunto_sopra_la_soglia(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    riassunto = ModelloFinto([AIMessage("  L'utente ha fatto tre domande.  ")])
+    agente = ModelloFinto([AIMessage("R5")])
+    nuova, testo = esegui_turno_con_riassunto(
+        grafo_con_riassunto(agente, riassunto, soglia=6, turni=1), turni_precedenti(4), "", "D5")
+    assert len(riassunto.chiamate) == 1
+    sistema, richiesta = riassunto.chiamate[0]
+    assert sistema.text == RIASSUMI
+    assert "Utente: D3" in richiesta.text and "Assistente: R3" in richiesta.text and "D4" not in richiesta.text
+    assert [m.text for m in nuova] == ["D4", "R4", "D5", "R5"]
+    assert testo == "L'utente ha fatto tre domande."
+    assert any(m.startswith("riassunto: 9 messaggi -> 3 in ") for m in caplog.messages)
+    # Il riassunto arriva all'agente in un messaggio dopo il prompt invariato e prima della cronologia: con tutti gli
+    # strumenti gemma lo ignorava dentro il prompt e, in un secondo messaggio di sistema, smetteva di chiamare gli
+    # strumenti (prove del 17/11/2026).
+    sistema_agente, riassunto_agente = agente.chiamate[0][:2]
+    assert sistema_agente.text == PROMPT_DI_SISTEMA
+    assert riassunto_agente.type == "human" and riassunto_agente.text.endswith("L'utente ha fatto tre domande.")
+    assert [m.text for m in agente.chiamate[0][2:]] == ["D4", "R4", "D5"]
+
+
+def test_riassunto_sostituisce_il_precedente():                               # Review Focus 2
+    riassunto = ModelloFinto([AIMessage("Si chiama Ottavio; ha chiesto l'ora.")])
+    _, testo = esegui_turno_con_riassunto(
+        grafo_con_riassunto(ModelloFinto([AIMessage("R5")]), riassunto, soglia=6, turni=1),
+        turni_precedenti(4), "Si chiama Ottavio.", "D5")
+    assert "Si chiama Ottavio." in riassunto.chiamate[0][1].text
+    assert testo == "Si chiama Ottavio; ha chiesto l'ora."
+
+
+def turno_con_strumento(n):
+    return [
+        HumanMessage(f"D{n}"),
+        AIMessage("", tool_calls=[{"name": "ora_corrente", "args": {}, "id": f"t{n}"}]),
+        ToolMessage("16:42", tool_call_id=f"t{n}", name="ora_corrente"),
+        AIMessage(f"R{n}"),
+    ]
+
+
+def test_riassunto_con_strumenti_non_lascia_orfani():                          # Review Focus 4
+    vecchia = [*turno_con_strumento(1), *turno_con_strumento(2), *turno_con_strumento(3)]
+    agente = ModelloFinto([chiamata("t4"), AIMessage("R4")])
+    nuova, _ = esegui_turno_con_riassunto(
+        grafo_con_riassunto(agente, ModelloFinto([AIMessage("Riassunto")]), [orologio], soglia=6, turni=1),
+        vecchia, "", "D4")
+    assert [m.text for m in nuova if m.type == "human"] == ["D3", "D4"]
+    richieste = {c["id"] for m in nuova if m.type == "ai" for c in m.tool_calls}
+    risposte = {m.tool_call_id for m in nuova if m.type == "tool"}
+    assert richieste == risposte == {"t3", "t4"}
+
+
+def test_riassunto_sopra_la_soglia_senza_turni_da_tagliare(caplog):
+    caplog.set_level(logging.DEBUG, logger="assistente")
+    riassunto = ModelloFinto([])
+    esegui_turno_con_riassunto(
+        grafo_con_riassunto(ModelloFinto([AIMessage("R2")]), riassunto, soglia=2, turni=2),
+        turno_con_strumento(1), "", "D2")
+    assert riassunto.chiamate == []
+    assert "riassunto: 5 messaggi, nessun turno da riassumere" in caplog.messages
+
+
+@pytest.mark.parametrize("voce, avviso", [
+    (RuntimeError("giù"), "riassunto: errore (RuntimeError), cronologia invariata"),
+    (AIMessage("  "), "riassunto: risposta vuota, cronologia invariata"),
+])
+def test_riassunto_errore_o_vuoto_lascia_tutto_invariato(caplog, voce, avviso):
+    nuova, testo = esegui_turno_con_riassunto(
+        grafo_con_riassunto(ModelloFinto([AIMessage("R5")]), ModelloFinto([voce]), soglia=6, turni=1),
+        turni_precedenti(4), "Precedente.", "D5")
+    assert len(nuova) == 10 and nuova[-1].text == "R5" and testo == "Precedente."
+    assert avviso in [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+
+def test_agente_e_router_ricevono_il_riassunto_il_revisore_no():
+    ausiliario = ModelloFinto([], decisioni=[decisione("conversazione", "nome")],
+                              valutazioni=[valutazione(True, "ok")])
+    agente = ModelloFinto([AIMessage("Ti chiami Ottavio.")])
+    esegui_turno_con_riassunto(
+        grafo_con_riassunto(agente, ausiliario, ambito=AMBITO, revisore=REVISORE),
+        [], "Si chiama Ottavio.", "Come mi chiamo?")
+    assert agente.chiamate[0][0].text == PROMPT_DI_SISTEMA and "Ottavio" in agente.chiamate[0][1].text
+    assert AMBITO in ausiliario.chiamate_router[0][0].text and "Ottavio" in ausiliario.chiamate_router[0][0].text
+    assert not any("Si chiama Ottavio." in m.text for m in ausiliario.chiamate_revisore[0])
+
+
+def test_turno_rifiutato_viene_riassunto():                                    # Review Focus 3
+    ausiliario = ModelloFinto([AIMessage("Ha chiesto una poesia, rifiutata.")],
+                              decisioni=[decisione("fuori_ambito", "poesia"), decisione("conversazione", "ok"),
+                                         decisione("conversazione", "ok")])
+    agente = ModelloFinto([AIMessage("R2"), AIMessage("R3")])
+    grafo = grafo_con_riassunto(agente, ausiliario, soglia=4, turni=1, ambito=AMBITO)
+    cronologia, testo = esegui_turno_con_riassunto(grafo, [], "", "una poesia")
+    cronologia, testo = esegui_turno_con_riassunto(grafo, cronologia, testo, "D2")
+    cronologia, testo = esegui_turno_con_riassunto(grafo, cronologia, testo, "D3")
+    assert "Utente: una poesia" in ausiliario.chiamate[0][1].text
+    assert [m.text for m in cronologia] == ["D2", "R2", "D3", "R3"]
+    assert testo == "Ha chiesto una poesia, rifiutata."
+
+
+def test_senza_istruzioni_nessun_nodo_riassunto():
+    assert "nodo_riassunto" not in costruisci_grafo(ModelloFinto([]), []).get_graph().nodes
+    assert "nodo_riassunto" in grafo_con_riassunto(ModelloFinto([]), ModelloFinto([])).get_graph().nodes
+
+
+def test_esegui_turno_resta_compatibile():
+    nuova = esegui_turno(grafo_con_riassunto(ModelloFinto([AIMessage("R1")]), ModelloFinto([])), [], "D1")
+    assert [m.text for m in nuova] == ["D1", "R1"]
+
+
+def test_modello_riassunto_separato_dal_router():
+    router = ModelloFinto([], decisioni=[decisione("conversazione", "ok")])
+    riassunto = ModelloFinto([AIMessage("Riassunto")])
+    _, testo = esegui_turno_con_riassunto(
+        costruisci_grafo(ModelloFinto([AIMessage("R5")]), [], AMBITO, router, riassunto_istruzioni=RIASSUMI,
+                         riassunto_soglia=6, riassunto_turni=1, modello_riassunto=riassunto),
+        turni_precedenti(4), "", "D5")
+    assert testo == "Riassunto" and len(riassunto.chiamate) == 1 and router.chiamate == []
+
+
+def test_senza_riassunto_un_solo_messaggio_di_sistema_all_agente():
+    agente = ModelloFinto([AIMessage("R1")])
+    esegui_turno_con_riassunto(grafo_con_riassunto(agente, ModelloFinto([])), [], "", "D1")
+    assert [m.type for m in agente.chiamate[0]] == ["system", "human"]
+
+
+def test_riassunto_troncato_lascia_tutto_invariato(caplog):
+    # Con finish_reason "length" il riassunto è tagliato a metà: sostituirlo cancellerebbe messaggi per sempre.
+    troncato = AIMessage("L'utente si chiama Otta", response_metadata={"finish_reason": "length"})
+    nuova, testo = esegui_turno_con_riassunto(
+        grafo_con_riassunto(ModelloFinto([AIMessage("R5")]), ModelloFinto([troncato]), soglia=6, turni=1),
+        turni_precedenti(4), "Precedente.", "D5")
+    assert len(nuova) == 10 and testo == "Precedente."
+    assert "riassunto: risposta troncata, cronologia invariata" in [
+        r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+
+PREFERENZE = "Preferenze dell'utente: rispondi sempre in inglese."
+
+
+def test_il_prompt_non_impone_piu_la_lingua():
+    assert PROMPT_DI_SISTEMA.startswith("Sei l'assistente del laboratorio. ")
+    assert "italiano" not in PROMPT_DI_SISTEMA
+
+
+def test_le_preferenze_stanno_in_cima_al_prompt_dell_agente():
+    finto = ModelloFinto([AIMessage("Hi!")])
+    esegui_turno(costruisci_grafo(finto, [], preferenze=PREFERENZE), [], "ciao")
+    assert finto.chiamate[0][0].type == "system"
+    assert finto.chiamate[0][0].text == f"{PREFERENZE}\n\n{PROMPT_DI_SISTEMA}"
+
+
+def test_preferenze_solo_all_agente_anche_con_il_riassunto():
+    ausiliario = ModelloFinto([AIMessage("Si chiama Ottavio.")], decisioni=[decisione("conversazione", "nome")],
+                              valutazioni=[valutazione(True, "ok")])
+    agente = ModelloFinto([AIMessage("Your name is Ottavio.")])
+    esegui_turno_con_riassunto(
+        grafo_con_riassunto(agente, ausiliario, soglia=6, turni=1, ambito=AMBITO, revisore=REVISORE,
+                            preferenze=PREFERENZE),
+        turni_precedenti(4), "", "Come mi chiamo?")
+    assert len(ausiliario.chiamate) == 1                       # il riassunto è stato fatto
+    sistema, riassunto = agente.chiamate[0][:2]
+    assert sistema.text == f"{PREFERENZE}\n\n{PROMPT_DI_SISTEMA}" and riassunto.text.endswith("Si chiama Ottavio.")
+    altri = [*ausiliario.chiamate, *ausiliario.chiamate_router, *ausiliario.chiamate_revisore]
+    assert not any("Preferenze dell'utente" in m.text for chiamata in altri for m in chiamata)
+
+
+def test_le_preferenze_non_cambiano_gli_strumenti_associati():
+    senza, con = ModelloFinto([]), ModelloFinto([])
+    costruisci_grafo(senza, [orologio, strumento_di_prova])
+    costruisci_grafo(con, [orologio, strumento_di_prova], preferenze=PREFERENZE)
+    assert [[s.name for s in elenco] for elenco in con.strumenti_associati] == \
+        [[s.name for s in elenco] for elenco in senza.strumenti_associati] == [["ora_corrente", "strumento_di_prova"]]

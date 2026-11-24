@@ -6,8 +6,15 @@ from conftest import SERVER_FINTO, FlussoDiTesto, ModelloFinto, chat
 from langchain_core.messages import AIMessage
 from langgraph.errors import GraphRecursionError
 
-from assistente.cli import IndicatoreAttesa, crea_indicatore_attesa, prepara_terminale
-from assistente.grafo import costruisci_grafo
+from assistente.cli import (
+    MESSAGGIO_PROMPT_NON_DISPONIBILI,
+    IndicatoreAttesa,
+    crea_indicatore_attesa,
+    prepara_terminale,
+)
+from assistente.client_mcp import ArgomentoPrompt, DefinizionePrompt, ErroreMCP
+from assistente.grafo import LIMITE_PASSAGGI, costruisci_grafo
+from assistente.prompt import righe_elenco
 
 
 def test_righe_vuote_e_spazi_ignorati():                              # Review Focus 1
@@ -38,7 +45,7 @@ def test_bom_iniziale_non_arriva_al_modello():
 def test_comandi_normalizzati_e_sconosciuti():
     finto = ModelloFinto([])
     uscita = chat(costruisci_grafo(finto, []), ["/aiuto", "  /ESCI  "])
-    assert "Comando sconosciuto. Comandi disponibili: /esci, /log" in uscita and finto.chiamate == []
+    assert "Comando sconosciuto. Comandi disponibili: /esci, /log, /prompts, /prompt" in uscita and finto.chiamate == []
 
 
 def test_esci_termina_senza_chiamare_il_modello():
@@ -88,7 +95,7 @@ def test_errore_generico_con_traceback_nel_log_di_debug(caplog):
 def test_limite_di_passaggi_raggiunto():
     finto = ModelloFinto([GraphRecursionError("troppi passaggi")])
     uscita = chat(costruisci_grafo(finto, []), ["D1"])
-    assert uscita[0] == "Errore: limite di 10 passaggi raggiunto. Turno annullato."
+    assert uscita[0] == f"Errore: limite di {LIMITE_PASSAGGI} passaggi raggiunto. Turno annullato."
 
 
 def test_risposta_non_valida_del_modello():
@@ -137,7 +144,7 @@ def test_attesa_nascosta_prima_del_saluto_dopo_ctrl_c():
 def test_righe_vuote_e_comandi_senza_attesa():
     righe = ["", "   ", "/aiuto", "/esci"]
     uscita = chat(costruisci_grafo(ModelloFinto([]), []), righe, con_attesa=True, livello_log="WARNING")
-    assert uscita == ["Comando sconosciuto. Comandi disponibili: /esci, /log", "Alla prossima!"]
+    assert uscita == ["Comando sconosciuto. Comandi disponibili: /esci, /log, /prompts, /prompt", "Alla prossima!"]
 
 
 def test_indicatore_scrive_e_cancella_esattamente():
@@ -219,7 +226,7 @@ VISIBILI = "Log visibili. Scrivi /log per nasconderli."
 def test_log_alterna_con_messaggi_e_senza_chiamare_il_modello():
     finto = ModelloFinto([])
     uscita = chat(costruisci_grafo(finto, []), ["/log", "  /LOG  ", "/log on", "/esci"])
-    assert uscita == [NASCOSTI, VISIBILI, "Comando sconosciuto. Comandi disponibili: /esci, /log",
+    assert uscita == [NASCOSTI, VISIBILI, "Comando sconosciuto. Comandi disponibili: /esci, /log, /prompts, /prompt",
                       "Alla prossima!"]
     assert finto.chiamate == []
 
@@ -251,3 +258,116 @@ def test_attesa_sparisce_dopo_log_che_mostra():
     uscita = chat(costruisci_grafo(finto, []), ["D1", "/log", "D2"], con_attesa=True, livello_log="WARNING")
     assert uscita == ["[mostra]", "[nascondi]", "Assistente> R1", VISIBILI, "Assistente> R2",
                       "Alla prossima!"]
+
+
+def grafo_con_riassunto(agente, riassunto):
+    """Grafo che riassume oltre 2 messaggi, conservando un solo turno precedente."""
+    return costruisci_grafo(agente, [], modello_router=riassunto, riassunto_istruzioni="RIASSUMI",
+                            riassunto_soglia=2, riassunto_turni=1)
+
+
+def test_chat_passa_il_riassunto_al_turno_successivo():
+    agente = ModelloFinto([AIMessage(f"R{i}") for i in range(1, 5)])
+    riassunto = ModelloFinto([AIMessage("RIASSUNTO-1"), AIMessage("RIASSUNTO-2")])
+    chat(grafo_con_riassunto(agente, riassunto), ["D1", "D2", "D3", "D4"])
+    assert len(riassunto.chiamate) == 2                   # al terzo e al quarto turno
+    assert "RIASSUNTO-1" in riassunto.chiamate[1][1].text   # il secondo riceve il primo come precedente
+    assert "RIASSUNTO-2" in agente.chiamate[3][1].text      # l'agente del quarto turno riceve l'ultimo
+
+
+def test_turno_fallito_conserva_cronologia_e_riassunto():               # Review Focus 1
+    agente = ModelloFinto([AIMessage("R1"), AIMessage("R2"), RuntimeError("giù"), AIMessage("R3")])
+    riassunto = ModelloFinto([AIMessage("RIASSUNTO-SCARTATO"), AIMessage("RIASSUNTO-BUONO")])
+    uscita = chat(grafo_con_riassunto(agente, riassunto), ["D1", "D2", "D3", "D3 di nuovo"])
+    assert any(riga.startswith("Errore: ") for riga in uscita)
+    secondo = riassunto.chiamate[1][1].text
+    assert "nessuno" in secondo and "RIASSUNTO-SCARTATO" not in secondo
+    assert "Utente: D1" in secondo                          # di nuovo da riassumere: la compressione fallita è scartata
+    assert "RIASSUNTO-BUONO" in agente.chiamate[3][1].text
+
+
+# Comandi /prompts e /prompt
+
+ELENCO_PROMPT = [
+    DefinizionePrompt("spiega", "Spiega un argomento al livello richiesto.", (
+        ArgomentoPrompt("argomento", "concetto da spiegare", True),
+        ArgomentoPrompt("livello", "base (predefinito), intermedio o avanzato", False),
+    )),
+]
+TESTO_SPIEGA = "Spiegami «Model Context Protocol» a livello base: usa parole semplici."
+
+
+def server_prompt_finto(testo=TESTO_SPIEGA):
+    """Funzione `richiedi_prompt` finta: registra le richieste e restituisce `testo` (o lo solleva)."""
+    chiamate = []
+
+    def richiedi(nome, argomenti):
+        chiamate.append((nome, argomenti))
+        if isinstance(testo, Exception):
+            raise testo
+        return testo
+
+    return richiedi, chiamate
+
+
+@pytest.mark.parametrize("comando", ["/prompts", "/Prompts"])
+def test_prompts_mostra_l_elenco_senza_chiamare_il_modello(comando):
+    finto = ModelloFinto([])
+    richiedi, chiamate = server_prompt_finto()
+    uscita = chat(costruisci_grafo(finto, []), [comando], elenco_prompt=ELENCO_PROMPT, richiedi_prompt=richiedi)
+    assert uscita == [*righe_elenco(ELENCO_PROMPT), "Alla prossima!"]
+    assert finto.chiamate == [] and chiamate == []
+
+
+def test_prompt_manda_al_grafo_il_testo_compilato():                                 # Review Focus 2
+    finto = ModelloFinto([AIMessage("R1"), AIMessage("R2")])
+    richiedi, chiamate = server_prompt_finto()
+    righe = ['/PROMPT spiega argomento="Model Context Protocol"', "D2"]
+    uscita = chat(costruisci_grafo(finto, []), righe, elenco_prompt=ELENCO_PROMPT, richiedi_prompt=richiedi)
+    assert uscita == ["Assistente> R1", "Assistente> R2", "Alla prossima!"]
+    assert chiamate == [("spiega", {"argomento": "Model Context Protocol"})]
+    assert finto.chiamate[0][1].content == TESTO_SPIEGA
+    assert [m.content for m in finto.chiamate[1][1:]] == [TESTO_SPIEGA, "R1", "D2"]
+
+
+def test_prompt_con_la_scritta_di_attesa():
+    finto = ModelloFinto([AIMessage("R1")])
+    richiedi, _ = server_prompt_finto()
+    uscita = chat(costruisci_grafo(finto, []), ["/prompt spiega argomento=pH"], con_attesa=True,
+                  livello_log="WARNING", elenco_prompt=ELENCO_PROMPT, richiedi_prompt=richiedi)
+    assert uscita == ["[mostra]", "[nascondi]", "Assistente> R1", "Alla prossima!"]
+
+
+def test_prompt_sbagliato_non_chiama_ne_server_ne_modello_e_lascia_la_cronologia():
+    finto = ModelloFinto([AIMessage("R1")])
+    richiedi, chiamate = server_prompt_finto()
+    uscita = chat(costruisci_grafo(finto, []), ["/prompt spiega livello=base", "D1"],
+                  elenco_prompt=ELENCO_PROMPT, richiedi_prompt=richiedi)
+    assert uscita[0] == (
+        "Errore: al prompt spiega manca l'argomento obbligatorio argomento. Scrivi /prompts per l'elenco."
+    )
+    assert chiamate == [] and len(finto.chiamate) == 1
+    assert [m.type for m in finto.chiamate[0]] == ["system", "human"]
+
+
+def test_prompt_rifiutato_dal_server_non_chiama_il_modello():
+    finto = ModelloFinto([])
+    messaggio = ("prompt spiega non letto dal server MCP prompt: "
+                 "livello non valido («esperto»): usa base, intermedio o avanzato")
+    richiedi, _ = server_prompt_finto(ErroreMCP(messaggio))
+    uscita = chat(costruisci_grafo(finto, []), ["/prompt spiega argomento=pH livello=esperto"],
+                  elenco_prompt=ELENCO_PROMPT, richiedi_prompt=richiedi)
+    assert uscita == [f"Errore: {messaggio}", "Alla prossima!"] and finto.chiamate == []
+
+
+@pytest.mark.parametrize("comando", ["/prompts", "/prompt spiega argomento=x"])
+def test_prompt_non_disponibili_e_la_chat_prosegue(comando):                          # Review Focus 5
+    finto = ModelloFinto([AIMessage("R1")])
+    uscita = chat(costruisci_grafo(finto, []), [comando, "D1"])
+    assert uscita == [MESSAGGIO_PROMPT_NON_DISPONIBILI, "Assistente> R1", "Alla prossima!"]
+
+
+def test_esci_con_altre_parole_resta_sconosciuto():
+    finto = ModelloFinto([])
+    uscita = chat(costruisci_grafo(finto, []), ["/esci ora"])
+    assert uscita[0].startswith("Comando sconosciuto.") and finto.chiamate == []

@@ -7,6 +7,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY ambito.txt revisore.txt riassunto.txt preferenze.json ./
 COPY assistente/ assistente/
+COPY calcolatrice_mcp/ calcolatrice_mcp/
+COPY catalogo_mcp/ catalogo_mcp/
+COPY preferenze_mcp/ preferenze_mcp/
+COPY prompt_mcp/ prompt_mcp/
+COPY note_api/ note_api/
 
 CMD ["python", "-m", "assistente"]

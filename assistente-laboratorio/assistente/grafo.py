@@ -3,25 +3,69 @@
 import json
 import logging
 import time
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import BaseTool
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+    ToolMessage,
+)
+from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 
+from assistente.revisore import (
+    SCHEMA_REVISORE,
+    indicazione,
+    leggi_valutazione,
+    messaggi_per_il_revisore,
+    ultima_domanda,
+)
+from assistente.riassunto import (
+    con_riassunto,
+    messaggi_di_contesto,
+    messaggi_per_il_riassunto,
+    punto_di_taglio,
+    trascrivi,
+)
+from assistente.router import SCHEMA_ROUTER, leggi_decisione, messaggi_per_il_router, testo_rifiuto
+
 logger = logging.getLogger(__name__)
 
-LIMITE_PASSAGGI = 10
+LIMITE_PASSAGGI = 21  # 10 per l'agente e gli strumenti, più riassunto, router, revisioni e pulizia
 
 PROMPT_DI_SISTEMA = (
-    "Sei l'assistente del laboratorio e rispondi sempre in italiano. "
+    "Sei l'assistente del laboratorio. "
     "Per l'ora, la data o il giorno attuali chiama sempre lo strumento ora_corrente, "
     "anche se nella conversazione c'è già un risultato precedente: quel risultato è superato. "
     "Non dedurre informazioni temporali che il risultato non contiene. "
     "Per l'ora di un'altra città chiama ora_corrente con il fuso IANA di quella città "
-    "(per esempio America/New_York) e usa il risultato così com'è, senza convertire da te."
+    "(per esempio America/New_York) e usa il risultato così com'è, senza convertire da te. "
+    "Per qualsiasi calcolo aritmetico chiama lo strumento calcola con l'espressione "
+    "(numeri con il punto decimale, ** per le potenze) invece di calcolare da te, "
+    "e usa il risultato così com'è; se lo strumento restituisce un errore, "
+    "dillo senza inventare un risultato. "
+    "Per ogni conversione tra unità di lunghezza, peso o temperatura chiama lo strumento converti "
+    "invece di calcolare da te o con calcola, e usa il risultato così com'è; "
+    "se lo strumento restituisce un errore, di' che la conversione non si può fare e perché. "
+    "Per i giorni mancanti o trascorsi fino a una data o tra due date chiama giorni_tra, "
+    "per la data tra N giorni o di N giorni fa chiama sposta_data, "
+    "per il giorno della settimana di una data chiama giorno_settimana "
+    "e per la data di Pasqua chiama pasqua, passando le date come AAAA-MM-GG "
+    "oppure MM-GG se l'anno non è indicato; non calcolare da te, usa il risultato così com'è e, "
+    "se lo strumento restituisce un errore, di' che non si può fare e perché. "
+    "Per salvare, elencare, cercare o cancellare note chiama salva_nota, elenca_note o cancella_nota; "
+    "per cancellare una nota indicata per argomento chiama prima elenca_note per trovarne il numero. "
+    "Non dire mai che una nota è salvata o cancellata senza il risultato dello strumento e, "
+    "se lo strumento restituisce un errore, di' che non si può fare e perché. "
+    "Per domande sugli apparecchi del laboratorio (dove si trovano, stato, calibrazione, "
+    "che cosa c'è in una stanza) chiama cerca_apparecchi, dettaglio_apparecchio o elenca_apparecchi "
+    "e rispondi solo con quello che restituiscono; se lo strumento dà un errore o nessun risultato, "
+    "dillo senza inventare apparecchi."
 )
 
 
@@ -30,9 +74,27 @@ class RispostaNonValida(Exception):
 
 
 class Stato(TypedDict):
-    """Stato del grafo: la cronologia dei messaggi, in aggiunta a ogni passaggio."""
+    """Stato del grafo: la cronologia dei messaggi, in aggiunta a ogni passaggio, il riassunto dei turni più vecchi
+    (passa da un turno all'altro e viene sostituito, non accumulato), la decisione del router e lo stato delle
+    revisioni del turno (ripartono da zero a ogni turno, perché ogni turno parte dai soli messaggi e dal riassunto)."""
 
     messages: Annotated[list[AnyMessage], add_messages]
+    riassunto: NotRequired[str]
+    categoria: NotRequired[str]
+    motivo_router: NotRequired[str]
+    revisioni: NotRequired[int]
+    scartati: NotRequired[list[str]]
+    approvata: NotRequired[bool]
+
+
+def instrada_revisore(stato: Stato) -> str:
+    """Arco condizionale dopo `nodo_revisore`: "nodo_pulizia" se la risposta resta, "nodo_llm" se va riscritta."""
+    return "nodo_pulizia" if stato.get("approvata", True) else "nodo_llm"
+
+
+def instrada_router(stato: Stato) -> str:
+    """Arco condizionale dopo `nodo_router`: "nodo_llm" se la domanda è in ambito, altrimenti "nodo_rifiuto"."""
+    return "nodo_rifiuto" if stato.get("categoria") == "fuori_ambito" else "nodo_llm"
 
 
 def instrada(stato: Stato) -> str:
@@ -50,20 +112,53 @@ def instrada(stato: Stato) -> str:
     return "nodo_strumenti"
 
 
-def costruisci_grafo(modello, strumenti: list[BaseTool]) -> CompiledStateGraph:
+def costruisci_grafo(
+    modello,
+    strumenti: list[BaseTool],
+    ambito: str | None = None,
+    modello_router=None,
+    revisore: str | None = None,
+    revisioni_max: int = 2,
+    riassunto_istruzioni: str | None = None,
+    riassunto_soglia: int = 20,
+    riassunto_turni: int = 2,
+    modello_riassunto=None,
+    preferenze: str | None = None,
+) -> CompiledStateGraph:
     """Costruisce il grafo attorno a `modello` e agli `strumenti`.
 
     START -> nodo_llm -> (instrada) -> nodo_strumenti | END, e nodo_strumenti -> nodo_llm.
+    Con `ambito` il grafo parte da nodo_router, che manda le domande fuori ambito a nodo_rifiuto -> END;
+    il router usa `modello_router` (predefinito: `modello`) senza strumenti e con l'ambito come prompt.
+    Con `revisore` (istruzioni) la risposta senza strumenti va a nodo_revisore: se non è coerente, e le revisioni
+    sono meno di `revisioni_max`, torna a nodo_llm con un'indicazione; altrimenti nodo_pulizia toglie bozze e
+    indicazioni e il turno finisce. Il revisore usa lo stesso modello del router.
+    Con `riassunto_istruzioni` il grafo parte da nodo_riassunto: oltre `riassunto_soglia` messaggi sostituisce i
+    turni più vecchi con un riassunto, lasciando intatti gli ultimi `riassunto_turni` turni e la domanda in corso;
+    usa `modello_riassunto` (predefinito: il modello del router), senza strumenti. L'agente riceve il riassunto in un
+    messaggio prima della cronologia, il router in coda al suo prompt.
+    Con `preferenze` (le frasi costruite dalle preferenze dell'utente) il prompt di sistema del solo agente è
+    `preferenze`, una riga vuota e `PROMPT_DI_SISTEMA`; router, revisore e riassunto non le ricevono.
     Gli strumenti vengono associati al modello una volta sola, e solo se l'elenco non è vuoto:
     un elenco `tools` vuoto può essere rifiutato dall'API.
     """
+    if ambito is not None:
+        router = (modello_router or modello).with_structured_output(
+            SCHEMA_ROUTER, method="json_schema", include_raw=True
+        )
+    if revisore is not None:
+        revisore_llm = (modello_router or modello).with_structured_output(
+            SCHEMA_REVISORE, method="json_schema", include_raw=True
+        )
+    modello_del_riassunto = modello_riassunto or modello_router or modello
     if strumenti:
         modello = modello.bind_tools(strumenti)
     per_nome = {strumento.name: strumento for strumento in strumenti}
+    prompt_agente = f"{preferenze}\n\n{PROMPT_DI_SISTEMA}" if preferenze else PROMPT_DI_SISTEMA
 
     def nodo_llm(stato: Stato) -> dict:
-        """Interroga il modello con il prompt di sistema (non salvato) e la cronologia."""
-        messaggi = [SystemMessage(PROMPT_DI_SISTEMA), *stato["messages"]]
+        """Interroga il modello con il prompt di sistema e l'eventuale riassunto (non salvati) e la cronologia."""
+        messaggi = [*messaggi_di_contesto(prompt_agente, stato.get("riassunto", "")), *stato["messages"]]
         logger.info("nodo_llm: chiamata al modello (%d messaggi)", len(messaggi))
         inizio = time.perf_counter()
         risposta = modello.invoke(messaggi)
@@ -77,11 +172,16 @@ def costruisci_grafo(modello, strumenti: list[BaseTool]) -> CompiledStateGraph:
         return {"messages": [risposta]}
 
     def nodo_strumenti(stato: Stato) -> dict:
-        """Esegue ogni richiesta dell'ultimo messaggio e risponde con un ToolMessage per ciascuna."""
+        """Esegue ogni richiesta dell'ultimo messaggio e risponde con un ToolMessage per ciascuna.
+
+        Una `ToolException` diventa un ToolMessage con stato "error" e il turno prosegue;
+        ogni altra eccezione risale e annulla il turno.
+        """
         risposte = []
         for richiesta in stato["messages"][-1].tool_calls:
             nome = richiesta["name"]
             strumento = per_nome.get(nome)
+            esito = "success"
             if strumento is None:
                 logger.warning("nodo_strumenti: strumento sconosciuto %s", nome)
                 risultato = f"Errore: strumento sconosciuto {nome}"
@@ -94,27 +194,158 @@ def costruisci_grafo(modello, strumenti: list[BaseTool]) -> CompiledStateGraph:
                         nome,
                         json.dumps(ignorati, ensure_ascii=False),
                     )
-                risultato = strumento.invoke(argomenti)
-                logger.info("nodo_strumenti: %s -> %s", nome, risultato)
-            risposte.append(ToolMessage(content=risultato, tool_call_id=richiesta["id"], name=nome))
+                try:
+                    risultato = strumento.invoke(argomenti)
+                    logger.info("nodo_strumenti: %s -> %s", nome, risultato)
+                except ToolException as errore:
+                    risultato = f"Errore: {errore}"
+                    esito = "error"
+                    logger.warning("nodo_strumenti: errore dello strumento %s: %s", nome, errore)
+            risposte.append(
+                ToolMessage(content=risultato, tool_call_id=richiesta["id"], name=nome, status=esito)
+            )
         return {"messages": risposte}
+
+    def nodo_router(stato: Stato) -> dict:
+        """Classifica l'ultima domanda; qualsiasi errore del router fa passare la domanda all'agente."""
+        prompt = con_riassunto(ambito, stato.get("riassunto", ""))
+        messaggi = [SystemMessage(prompt), *messaggi_per_il_router(stato["messages"])]
+        inizio = time.perf_counter()
+        try:
+            categoria, motivo = leggi_decisione(router.invoke(messaggi))
+        except Exception as errore:
+            logger.warning("router: errore (%s), la domanda passa all'agente", type(errore).__name__)
+            categoria, motivo = "conversazione", "errore del router"
+        descrizione = "fuori ambito" if categoria == "fuori_ambito" else categoria
+        logger.info("router: %s (%s) in %.1f s", descrizione, motivo, time.perf_counter() - inizio)
+        return {"categoria": categoria, "motivo_router": motivo}
+
+    def nodo_rifiuto(stato: Stato) -> dict:
+        """Risponde con il rifiuto senza chiamare l'agente."""
+        logger.info("nodo_rifiuto: domanda fuori ambito")
+        return {"messages": [AIMessage(testo_rifiuto(stato["motivo_router"]))]}
+
+    def nodo_revisore(stato: Stato) -> dict:
+        """Valuta l'ultima risposta; qualsiasi errore del revisore la approva."""
+        domanda, bozza = ultima_domanda(stato["messages"]), stato["messages"][-1]
+        revisioni = stato.get("revisioni", 0)
+        inizio = time.perf_counter()
+        try:
+            risultato = revisore_llm.invoke(messaggi_per_il_revisore(revisore, domanda, bozza.text))
+            coerente, motivo = leggi_valutazione(risultato)
+        except Exception as errore:
+            logger.warning("revisore: errore (%s), la risposta è approvata", type(errore).__name__)
+            coerente, motivo = True, "errore del revisore"
+        durata = time.perf_counter() - inizio
+        if coerente:
+            logger.info("revisore: coerente (%s) in %.1f s", motivo, durata)
+            return {"approvata": True}
+        if revisioni >= revisioni_max:
+            logger.info("revisore: non coerente (%s) in %.1f s", motivo, durata)
+            logger.warning("revisore: limite di revisioni raggiunto, si restituisce l'ultima risposta")
+            return {"approvata": True}
+        revisioni += 1
+        logger.info(
+            "revisore: non coerente (%s), revisione %d di %d in %.1f s", motivo, revisioni, revisioni_max, durata
+        )
+        nuova = indicazione(motivo, domanda)
+        return {
+            "messages": [nuova],
+            "revisioni": revisioni,
+            "scartati": [*stato.get("scartati", []), bozza.id, nuova.id],
+            "approvata": False,
+        }
+
+    def nodo_riassunto(stato: Stato) -> dict:
+        """Oltre la soglia sostituisce i turni più vecchi con un riassunto; qualsiasi errore lascia tutto com'è."""
+        messaggi = stato["messages"]
+        if len(messaggi) <= riassunto_soglia:
+            logger.debug("riassunto: %d messaggi, sotto la soglia di %d", len(messaggi), riassunto_soglia)
+            return {}
+        taglio = punto_di_taglio(messaggi, riassunto_turni)
+        if taglio == 0:
+            logger.debug("riassunto: %d messaggi, nessun turno da riassumere", len(messaggi))
+            return {}
+        richiesta = messaggi_per_il_riassunto(
+            riassunto_istruzioni, stato.get("riassunto", ""), trascrivi(messaggi[:taglio])
+        )
+        inizio = time.perf_counter()
+        try:
+            risposta = modello_del_riassunto.invoke(richiesta)
+        except Exception as errore:
+            logger.warning("riassunto: errore (%s), cronologia invariata", type(errore).__name__)
+            return {}
+        if risposta.response_metadata.get("finish_reason") == "length":
+            # Un riassunto tagliato a metà sostituirebbe il precedente e cancellerebbe i messaggi per sempre.
+            logger.warning("riassunto: risposta troncata, cronologia invariata")
+            return {}
+        nuovo = risposta.text.strip()
+        if not nuovo:
+            logger.warning("riassunto: risposta vuota, cronologia invariata")
+            return {}
+        logger.info(
+            "riassunto: %d messaggi -> %d in %.1f s", len(messaggi), len(messaggi) - taglio,
+            time.perf_counter() - inizio,
+        )
+        return {
+            "riassunto": nuovo,
+            "messages": [RemoveMessage(id=messaggio.id) for messaggio in messaggi[:taglio]],
+        }
+
+    def nodo_pulizia(stato: Stato) -> dict:
+        """Toglie dalla cronologia le bozze rifiutate e le indicazioni del revisore."""
+        scartati = stato.get("scartati", [])
+        if not scartati:
+            return {}
+        logger.info("nodo_pulizia: rimossi %d messaggi di revisione", len(scartati))
+        return {"messages": [RemoveMessage(id=identificativo) for identificativo in scartati]}
+
+    def instrada_agente(stato: Stato) -> str:
+        """Dopo nodo_llm: strumenti se richiesti; altrimenti revisore (se configurato) o fine."""
+        destinazione = instrada(stato)
+        return "nodo_revisore" if destinazione == END and revisore is not None else destinazione
 
     costruttore = StateGraph(Stato)
     costruttore.add_node("nodo_llm", nodo_llm)
     costruttore.add_node("nodo_strumenti", nodo_strumenti)
-    costruttore.add_edge(START, "nodo_llm")
-    costruttore.add_conditional_edges("nodo_llm", instrada, ["nodo_strumenti", END])
+    primo = "nodo_llm" if ambito is None else "nodo_router"
+    if riassunto_istruzioni is None:
+        costruttore.add_edge(START, primo)
+    else:
+        costruttore.add_node("nodo_riassunto", nodo_riassunto)
+        costruttore.add_edge(START, "nodo_riassunto")
+        costruttore.add_edge("nodo_riassunto", primo)
+    if ambito is not None:
+        costruttore.add_node("nodo_router", nodo_router)
+        costruttore.add_node("nodo_rifiuto", nodo_rifiuto)
+        costruttore.add_conditional_edges("nodo_router", instrada_router, ["nodo_llm", "nodo_rifiuto"])
+        costruttore.add_edge("nodo_rifiuto", END)
+    if revisore is None:
+        costruttore.add_conditional_edges("nodo_llm", instrada, ["nodo_strumenti", END])
+    else:
+        costruttore.add_node("nodo_revisore", nodo_revisore)
+        costruttore.add_node("nodo_pulizia", nodo_pulizia)
+        costruttore.add_conditional_edges("nodo_llm", instrada_agente, ["nodo_strumenti", "nodo_revisore"])
+        costruttore.add_conditional_edges("nodo_revisore", instrada_revisore, ["nodo_llm", "nodo_pulizia"])
+        costruttore.add_edge("nodo_pulizia", END)
     costruttore.add_edge("nodo_strumenti", "nodo_llm")
     return costruttore.compile()
 
 
-def esegui_turno(grafo: CompiledStateGraph, cronologia: list[AnyMessage], testo: str) -> list[AnyMessage]:
-    """Esegue un turno e restituisce la nuova cronologia; `cronologia` non viene modificata.
+def esegui_turno_con_riassunto(
+    grafo: CompiledStateGraph, cronologia: list[AnyMessage], riassunto: str, testo: str
+) -> tuple[list[AnyMessage], str]:
+    """Esegue un turno e restituisce la nuova cronologia e il nuovo riassunto; gli argomenti non vengono modificati.
 
-    Se il turno fallisce l'eccezione risale a chi chiama, che conserva la cronologia di prima.
+    Se il turno fallisce l'eccezione risale a chi chiama, che conserva cronologia e riassunto di prima.
     """
     risultato = grafo.invoke(
-        {"messages": [*cronologia, HumanMessage(testo)]},
+        {"messages": [*cronologia, HumanMessage(testo)], "riassunto": riassunto},
         {"recursion_limit": LIMITE_PASSAGGI},
     )
-    return risultato["messages"]
+    return risultato["messages"], risultato.get("riassunto", "")
+
+
+def esegui_turno(grafo: CompiledStateGraph, cronologia: list[AnyMessage], testo: str) -> list[AnyMessage]:
+    """Esegue un turno senza riassunto precedente e restituisce la nuova cronologia (vedi `esegui_turno_con_riassunto`)."""
+    return esegui_turno_con_riassunto(grafo, cronologia, "", testo)[0]

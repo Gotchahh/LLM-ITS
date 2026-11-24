@@ -12,6 +12,8 @@ from assistente.config import Configurazione, ErroreConfigurazione
 CHIAVE_API = "lm-studio"  # segnaposto: LM Studio non controlla la chiave, ma il client ne vuole una
 TIMEOUT_CONTROLLO = 5.0
 TIMEOUT_MODELLO = 180.0
+TOKEN_ROUTER = 80  # la decisione del router è breve: un tetto ferma le risposte che degenerano
+TOKEN_RIASSUNTO = 400  # un riassunto di una decina di righe; il tetto del router lo troncherebbe
 
 
 class ErroreServer(RuntimeError):
@@ -68,3 +70,30 @@ def crea_modello(config: Configurazione) -> ChatOpenAI:
         timeout=TIMEOUT_MODELLO,
         max_retries=1,
     )
+
+
+def _modello_senza_ragionamento(config: Configurazione, token: int) -> ChatOpenAI:
+    """Client come `crea_modello`, senza ragionamento e con un tetto di `token` alla risposta."""
+    return ChatOpenAI(
+        model=config.modello,
+        base_url=config.base_url,
+        api_key=CHIAVE_API,
+        temperature=0,
+        timeout=TIMEOUT_MODELLO,
+        max_retries=1,
+        reasoning_effort="none",
+        max_tokens=token,
+    )
+
+
+def crea_modello_router(config: Configurazione) -> ChatOpenAI:
+    """Client del modello per il router: come `crea_modello`, senza ragionamento e con un tetto ai token.
+
+    Con il ragionamento attivo gemma impiega circa 50 s per decidere; senza, circa 9 s (prove del 09/11/2026).
+    """
+    return _modello_senza_ragionamento(config, TOKEN_ROUTER)
+
+
+def crea_modello_riassunto(config: Configurazione) -> ChatOpenAI:
+    """Client del modello per il riassunto della cronologia: senza ragionamento, con spazio per qualche riga."""
+    return _modello_senza_ragionamento(config, TOKEN_RIASSUNTO)

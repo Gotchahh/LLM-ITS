@@ -2,10 +2,15 @@
 
 import io
 import logging
+import socket
+import threading
+import time
 
 import pytest
+import uvicorn
 
 from assistente.cli import esegui_chat
+from note_api.server import crea_app
 
 VALIDO = {"LMSTUDIO_BASE_URL": "http://localhost:1234/v1", "LMSTUDIO_MODEL": "google/gemma-4-e4b",
           "APP_TIMEZONE": "Europe/Rome"}
@@ -44,10 +49,34 @@ class ModelloFinto:
     in `strumenti_associati`.
     """
 
-    def __init__(self, risposte):
+    def __init__(self, risposte, decisioni=(), valutazioni=()):
         self.risposte = list(risposte)
         self.chiamate = []
         self.strumenti_associati = []
+        self.decisioni = list(decisioni)
+        self.chiamate_router = []
+        self.opzioni_router = []
+        self.valutazioni = list(valutazioni)
+        self.chiamate_revisore = []
+
+    def with_structured_output(self, schema, **opzioni):
+        """Router o revisore simulato, scelto dal titolo dello schema: restituisce o solleva, nell'ordine,
+        le voci di `decisioni` (router) o di `valutazioni` (revisore)."""
+        if schema["title"] == "valutazione_revisore":
+            coda, chiamate = self.valutazioni, self.chiamate_revisore
+        else:
+            self.opzioni_router.append(opzioni)
+            coda, chiamate = self.decisioni, self.chiamate_router
+
+        class Finto:
+            def invoke(self, messaggi):
+                chiamate.append(list(messaggi))
+                voce = coda.pop(0)
+                if isinstance(voce, BaseException):
+                    raise voce
+                return voce
+
+        return Finto()
 
     def bind_tools(self, strumenti):
         self.strumenti_associati.append(strumenti)
@@ -74,11 +103,12 @@ class AttesaFinta:
         self.stampato.append("[nascondi]")
 
 
-def chat(grafo, righe, con_attesa=False, livello_log="INFO"):
+def chat(grafo, righe, con_attesa=False, livello_log="INFO", **opzioni):
     """Esegue la chat con le `righe` date (poi fine input) e restituisce le stringhe stampate.
 
     Con `con_attesa=True` usa un indicatore di attesa finto, che scrive nella stessa lista.
     `livello_log` è il livello d'avvio dei log, da cui dipende la modalità iniziale di `/log`.
+    Le altre `opzioni` (per esempio `elenco_prompt`, `richiedi_prompt`) vanno a `esegui_chat`.
     """
     da_leggere = list(righe)
     stampato = []
@@ -90,5 +120,40 @@ def chat(grafo, righe, con_attesa=False, livello_log="INFO"):
 
     attesa = AttesaFinta(stampato) if con_attesa else None
     esegui_chat(grafo, SERVER_FINTO, leggi=leggi, scrivi=stampato.append, attesa=attesa,
-                livello_log=livello_log)
+                livello_log=livello_log, **opzioni)
     return stampato
+
+
+def porta_libera() -> int:
+    """Una porta TCP locale libera in questo momento."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture(scope="module")
+def servizio_note(tmp_path_factory):
+    """Servizio delle note vero (uvicorn in un thread) su un DB temporaneo; restituisce l'URL."""
+    porta = porta_libera()
+    percorso = tmp_path_factory.mktemp("note") / "note.db"
+    server = uvicorn.Server(uvicorn.Config(crea_app(percorso), host="127.0.0.1", port=porta, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    limite = time.monotonic() + 10
+    while not server.started:
+        if time.monotonic() > limite:
+            raise RuntimeError("il servizio delle note di prova non è partito")
+        time.sleep(0.05)
+    yield f"http://127.0.0.1:{porta}"
+    server.should_exit = True
+    thread.join(timeout=10)
+
+
+def decisione(categoria, motivo):
+    """Voce di `ModelloFinto.decisioni` come la restituisce `with_structured_output(..., include_raw=True)`."""
+    return {"raw": None, "parsed": {"categoria": categoria, "motivo": motivo}, "parsing_error": None}
+
+
+def valutazione(coerente, motivo):
+    """Voce di `ModelloFinto.valutazioni` come la restituisce `with_structured_output(..., include_raw=True)`."""
+    return {"raw": None, "parsed": {"coerente": coerente, "motivo": motivo}, "parsing_error": None}

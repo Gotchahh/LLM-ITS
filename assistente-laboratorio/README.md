@@ -3,13 +3,24 @@
 Applicazione da terminale in Python costruita attorno a un grafo LangGraph esplicito.
 Il grafo inoltra la conversazione al modello locale servito da LM Studio e conserva la
 cronologia per la durata della sessione (nessuna persistenza). Il modello può chiedere lo
-strumento orologio `ora_corrente`, che il programma esegue davvero.
+strumento orologio `ora_corrente`, i quattro strumenti del calendario `giorni_tra`, `sposta_data`,
+`giorno_settimana` e `pasqua` (vedi «Giorni e scadenze»), il convertitore di unità `converti` (vedi «Convertitore») e lo strumento
+`calcola` della calcolatrice, offerto da un server MCP (vedi «Calcolatrice»), e gli strumenti delle note
+`salva_nota`, `elenca_note` e `cancella_nota`, offerti da un'API FastAPI (vedi «Note»), e gli strumenti del catalogo
+della strumentazione `cerca_apparecchi`, `dettaglio_apparecchio` ed `elenca_apparecchi`, offerti da un secondo server
+MCP (vedi «Catalogo della strumentazione»); il programma li esegue davvero. Prima dell'agente un router controlla
+che la domanda sia scientifica o sul laboratorio e rifiuta le altre (vedi «Router dell'ambito»); dopo la risposta
+un revisore controlla che risponda a tutta la domanda e, se no, la fa riscrivere (vedi «Revisore della risposta»).
+Quando la conversazione si allunga, all'inizio del turno un nodo di riassunto sostituisce i turni più vecchi con un
+riassunto e lascia intatti gli ultimi (vedi «Riassunto della cronologia»). All'avvio legge le preferenze
+dell'utente (lingua, fuso orario, stile) da una resource MCP e le mette in cima al prompt dell'agente (vedi
+«Preferenze dell'utente»).
 
 I comandi sono per PowerShell (Windows) e vanno eseguiti dalla cartella `assistente-laboratorio/`.
 Gli esempi di output riportati sono di esecuzioni reali: le chat e i log dello strumento orologio, anche
 in Docker, sono del 28/10/2026; il confronto tra gli orologi, i casi con `docker compose up`/`down` e con `.env`
 mancante sono del 02/11/2026; riprovati lo stesso giorno, con lo stesso esito, anche i messaggi d'errore della
-Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
+Diagnosi (server o modello assenti, `Connection refused` dal container) e `Get-NetTCPConnection`. Le prove della calcolatrice e del convertitore, in locale e in Docker, sono del 03/11/2026; quelle di giorni e scadenze, delle note, del catalogo, del router e del revisore del 09/11/2026; quelle del riassunto della cronologia del 17/11/2026; quelle delle preferenze del 18/11/2026. Orari e offset (per esempio `-04:00`, EDT) cambiano con la data.
 
 ## Requisiti
 
@@ -51,6 +62,13 @@ Se `.env` esiste già il comando lo sovrascrive: in quel caso modificare il file
 | `LMSTUDIO_MODEL` | `google/gemma-4-e4b` | Identificativo del modello, uguale a quello restituito da `GET /v1/models` |
 | `APP_TIMEZONE` | `Europe/Rome` | Fuso orario IANA per lo strumento orologio |
 | `LOG_LEVEL` | `INFO` | Facoltativa (default `INFO`), maiuscole o minuscole |
+| `NOTE_API_URL` | `http://localhost:8000` | Facoltativa (default `http://localhost:8000`): indirizzo del servizio delle note |
+| `AMBITO_FILE` | `ambito.txt` | Facoltativa (default `ambito.txt`): file con l'ambito dell'agente, usato dal router |
+| `REVISORE_FILE` | `revisore.txt` | Facoltativa (default `revisore.txt`): istruzioni del revisore della risposta |
+| `REVISIONI_MAX` | `2` | Facoltativa (default `2`): revisioni al massimo per turno; `0` = il revisore approva sempre |
+| `RIASSUNTO_FILE` | `riassunto.txt` | Facoltativa (default `riassunto.txt`): istruzioni del riassunto della cronologia |
+| `RIASSUNTO_SOGLIA` | `20` | Facoltativa (default `20`): oltre questo numero di messaggi si riassumono i turni più vecchi; intero da 1 in su |
+| `RIASSUNTO_TURNI` | `2` | Facoltativa (default `2`): turni recenti lasciati intatti, oltre alla domanda in corso; intero da 1 in su |
 
 Le prime tre sono obbligatorie: se mancano o sono vuote, l'errore le elenca e rimanda a `.env.example`.
 
@@ -99,12 +117,68 @@ Si attivano esplicitamente (LM Studio con il server avviato, il modello caricato
 .\.venv\Scripts\python.exe -m pytest -m reale -v
 ```
 
-Sono quattro prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
+Sono venti prove: una risposta ordinaria (senza strumento), il ricordo di un'informazione data nel turno
 precedente, due domande sull'ora nella stessa sessione (almeno una richiesta di `ora_corrente` per turno: il modello può
-chiamarla più volte nello stesso turno) e l'ora
-di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`).
-Con un modello locale possono richiedere diversi minuti (ogni prova fa più chiamate al modello e la prima carica
-il modello). Se il modello non chiama lo strumento la prova fallisce: il fallimento va riportato, non aggirato.
+chiamarla più volte nello stesso turno), l'ora
+di New York (una richiesta di `ora_corrente` con il fuso `America/New_York`) e un calcolo («Quanto fa 12,5 per 8
+meno 3?»: il risultato `97` deve venire dallo strumento `calcola` e comparire nella risposta) e due conversioni
+(«Quanti metri sono 4 cm?» e «Quanti gradi Fahrenheit sono 20 °C?»: i risultati `4 cm = 0,04 m` e `20 °C = 68 °F`
+devono venire dallo strumento `converti`, e `0,04` e `68` comparire nella risposta), i giorni che mancano al
+25 dicembre (il risultato di `giorni_tra` deve coincidere con il numero calcolato sulla data reale di oggi, che deve
+comparire nella risposta), la Pasqua del 2027 (`pasqua` deve restituire `Pasqua 2027: domenica 28 marzo 2027` e
+la risposta contenere `28 marzo`), le note («Segnati che il microscopio 2 va calibrato.» deve produrre un
+`salva_nota` riuscito e, in una conversazione nuova, «Che note ho?» un `elenca_note` con la nota e la parola
+`microscopio` nella risposta; il test avvia da sé il servizio su un DB temporaneo) e il catalogo («Dov'è la
+centrifuga?» → `cerca_apparecchi` e la stanza `A03` nella risposta; «Quali apparecchi sono in manutenzione?» →
+`elenca_apparecchi` con `MIC-02` e `PHM-01`, nominati per codice o per nome nella risposta) e il router («Scrivimi
+una poesia sul mare.» → rifiuto, senza nessuna chiamata dell'agente nei log; «Cos'è il pH?» → in ambito, risposta
+dell'agente) e il revisore (il revisore reale, interrogato direttamente, giudica non coerente la risposta parziale
+«Mancano 46 giorni a Natale.» a «Quanti giorni mancano a Natale e che giorno della settimana sarà?»; la stessa
+domanda al grafo produce una risposta con il numero e «venerdì»; «Quanto fa 12,5 per 8 meno 3?» è approvata al
+primo passaggio) e il riassunto (il riassunto reale, interrogato direttamente, scrive «Ottavio» per esteso, sia da una
+presentazione breve sia da una più lunga che chiede l'ora, e non riporta l'orario; con soglia 4 e un turno conservato,
+«Ciao, mi chiamo Ottavio.», un calcolo, una conversione e «Come mi chiamo?» producono almeno una compressione nel log,
+il primo turno esce dalla cronologia e la risposta finale contiene «Ottavio»). Tutte passano da router e revisore, che
+quindi non devono rifiutare le domande delle altre prove; nessuna delle prove brevi arriva alla soglia del riassunto.
+Con un modello locale possono richiedere diversi minuti (il 17/11/2026, con `google/gemma-4-e4b`, 1754 s; ogni prova
+fa più chiamate al modello e la prima carica il modello). Se il modello non chiama lo strumento la prova fallisce:
+il fallimento va riportato, non aggirato.
+
+I test delle note (senza modello) sono in `tests/test_note_api.py` (il servizio con il `TestClient` di FastAPI su un
+DB temporaneo), `tests/test_note.py` (gli strumenti contro un vero uvicorn avviato dai test, anche spento) e in
+`tests/test_grafo.py`.
+
+I test di giorni e scadenze (senza modello, con oggi fissato al 03/11/2026) sono in `tests/test_calendario.py`
+(lettura delle date, conteggi, anni bisestili, Pasqua, errori, oggi nel fuso configurato vicino alla mezzanotte) e
+in `tests/test_grafo.py` (il giro nel grafo con un modello finto, anche con errore).
+
+I test del convertitore (senza modello) sono in `tests/test_convertitore.py` (conversioni, formato, nomi delle
+unità, errori) e in `tests/test_grafo.py` (il giro nel grafo con un modello finto, anche con errore).
+
+I test del catalogo (senza modello) sono in `tests/test_apparecchi.py` (logica pura e controllo del file JSON),
+`tests/test_server_catalogo.py` (il server avviato davvero su stdio), `tests/test_client_mcp.py` (i due server, errori
+d'avvio e di trasporto con il nome del server) e `tests/test_integrazione_mcp.py` (il grafo con un modello finto).
+
+I test delle preferenze (senza modello) sono in `tests/test_preferenze_mcp.py` (il server avviato davvero su stdio:
+resource, BOM, file riletto, file mancante senza traceback), `tests/test_client_mcp.py` (lettura della resource ed
+errori con il motivo), `tests/test_preferenze.py` (controlli campo per campo, predefiniti, avvisi, blocco del
+prompt), `tests/test_grafo.py` (il blocco in cima al prompt dell'agente) e `tests/test_main.py` (l'avvio). Le prove
+reali `test_reale_preferenze_fuso`, `test_reale_preferenze_lingua` e `test_reale_preferenze_stile` costruiscono il
+grafo con preferenze scelte dal test (fuso di New York, lingua inglese, i due stili a confronto), non con quelle del
+file.
+
+I test della calcolatrice (tutti senza modello) sono in quattro file:
+
+- `tests/test_calcolo.py`: la logica pura (risultati, formato dei numeri, errori, nessuna esecuzione di codice);
+- `tests/test_server_mcp.py`: il server MCP avviato davvero su stdio (catalogo, invocazione, errori);
+- `tests/test_client_mcp.py`: il client (strumenti sincroni, errori di validazione e di trasporto, Ctrl+C);
+- `tests/test_integrazione_mcp.py`: il grafo con un modello finto e il server MCP vero.
+
+I test che avviano il server sono più lenti degli altri (circa 2 s per ogni avvio). Per provare solo il server:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_server_mcp.py -v
+```
 
 ## Avvio
 
@@ -182,6 +256,142 @@ Get-Content chat.txt
 Senza quella riga le lettere accentate di ingresso arrivano come `?` e quelle in uscita compaiono alterate
 (`├¿` al posto di `è`): è la codifica di PowerShell, non del programma.
 
+## Router dell'ambito
+
+Prima dell'agente un secondo nodo LLM, il **router**, decide se la domanda rientra nell'ambito dell'assistente
+(scienze, laboratorio, ciò che gli strumenti sanno fare, saluti e conversazione con l'utente):
+
+```text
+START → nodo_router ─conversazione→ nodo_llm ⇄ nodo_strumenti → END
+                    └─fuori ambito→ nodo_rifiuto → END
+```
+
+- L'ambito è il testo di `ambito.txt` (percorso modificabile con `AMBITO_FILE`): è il prompt del router e si cambia
+  senza toccare il codice, con effetto dal riavvio.
+- Il router usa lo stesso modello, senza strumenti, e risponde in forma strutturata (`categoria` e `motivo`); vede
+  le ultime domande e risposte testuali, così capisce le domande di seguito. La sua decisione non entra nella
+  cronologia.
+- Fuori ambito: `nodo_rifiuto` risponde «Posso aiutarti solo con domande scientifiche o sul laboratorio: <motivo>.»
+  e l'agente non viene chiamato. Il rifiuto resta nella cronologia, come una risposta normale.
+- Il router ha un client del modello suo, **senza ragionamento** (`reasoning_effort="none"`) e con al massimo 80
+  token: con il ragionamento una decisione richiedeva circa 50 s, senza circa 7–12 s (prove del 09/11/2026). Ogni
+  domanda costa quindi qualche secondo in più.
+- Se il router non decide (risposta illeggibile, errore, tetto dei token raggiunto) la domanda **passa all'agente**,
+  con un `[WARNING]` nel log: meglio una risposta in più che un rifiuto sbagliato.
+
+Prova reale da pipe del 09/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`; uguale in Docker):
+
+```text
+[INFO] router: fuori ambito (Argomento sportivo non relativo al laboratorio.) in 12.0 s
+[INFO] nodo_rifiuto: domanda fuori ambito
+Tu> Assistente> Posso aiutarti solo con domande scientifiche o sul laboratorio: Argomento sportivo non relativo al laboratorio.
+```
+
+Nella stessa prova, per «Cos'è il pH?» il router ha esaurito il tetto dei token (con gemma succede con questa
+domanda anche senza ragionamento): `[WARNING] router: errore (...)`, poi `router: conversazione (errore del router)`
+e la risposta dell'agente, come previsto.
+
+## Revisore della risposta
+
+Dopo la risposta dell'agente un terzo nodo LLM, il **revisore**, controlla che risponda davvero alla domanda:
+
+```text
+nodo_llm (risposta senza strumenti) → nodo_revisore ─coerente / limite→ nodo_pulizia → END
+                                                     └─non coerente→ nodo_llm (con l'indicazione del revisore)
+```
+
+- Le istruzioni sono in `revisore.txt` (`REVISORE_FILE`). Severità moderata: la risposta non è coerente solo se manca
+  una parte chiesta esplicitamente o se parla d'altro; stile, lunghezza e verità dei fatti non si giudicano; in caso
+  di dubbio è coerente.
+- Il revisore usa lo stesso client senza ragionamento del router (circa 7–10 s per risposta) e risponde con
+  `motivo` e poi `coerente`: con il verdetto per primo gemma approvava una risposta parziale pur scrivendo nel motivo
+  che mancava una parte.
+- Se non è coerente, l'agente riceve un'indicazione con il motivo e riscrive (anche con nuovi strumenti), fino a
+  `REVISIONI_MAX` volte (default 2; al limite resta l'ultima risposta, con un `[WARNING]`).
+- `nodo_pulizia` toglie dalla cronologia le bozze rifiutate e le indicazioni: si vede solo la risposta finale, e i
+  turni successivi non le ricevono. Il rifiuto del router non passa dal revisore.
+- Se il revisore non decide (errore, risposta illeggibile) la risposta è approvata, con un `[WARNING]`.
+
+Prova reale da pipe del 09/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`; uguale in Docker):
+
+```text
+[INFO] router: conversazione (Domanda su date e giorni della settimana.) in 9.1 s
+[INFO] instradamento: richiesta strumento giorni_tra {"data": "12-25"}
+[INFO] instradamento: richiesta strumento giorno_settimana {"data": "12-25"}
+[INFO] nodo_strumenti: giorni_tra -> da lunedì 9 novembre 2026 a venerdì 25 dicembre 2026: mancano 46 giorni
+[INFO] nodo_strumenti: giorno_settimana -> venerdì 25 dicembre 2026
+[INFO] instradamento: nessuno strumento -> fine
+[INFO] revisore: coerente (risposta completa) in 7.8 s
+Tu> Assistente> Mancano **46 giorni** a Natale (il 25 dicembre 2026). Sarà un **venerdì**.
+```
+
+(Righe di `nodo_llm` omesse.) Il percorso con un rifiuto e una nuova risposta è verificato dai test automatici con
+un agente simulato; il giudizio del revisore reale su una risposta parziale da una prova reale dedicata.
+
+## Riassunto della cronologia
+
+Con un modello locale il contesto è limitato e ogni turno aggiunge messaggi. All'inizio del turno un quarto nodo LLM,
+il **riassunto**, sostituisce i turni più vecchi con un riassunto e lascia intatti gli ultimi:
+
+```text
+START → nodo_riassunto → nodo_router → nodo_llm ⇄ nodo_strumenti → nodo_revisore → … (come sopra)
+```
+
+- Si riassume solo quando la cronologia, domanda del turno compresa, supera `RIASSUNTO_SOGLIA` messaggi (default 20;
+  contano anche richieste e risultati degli strumenti). Sotto la soglia il modello non viene chiamato.
+- Restano intatti gli ultimi `RIASSUNTO_TURNI` turni (default 2) e la domanda in corso. Il taglio cade sempre prima di
+  una domanda dell'utente, quindi una richiesta di strumento non viene mai separata dal suo risultato.
+- Il riassunto è un campo dello stato: a ogni compressione il modello riceve il riassunto precedente e i turni da
+  togliere e ne scrive uno nuovo, che **sostituisce** il precedente. Dura quanto la sessione, come la cronologia; un
+  turno fallito lascia cronologia e riassunto com'erano.
+- Le istruzioni sono in `riassunto.txt` (`RIASSUNTO_FILE`): il nome dell'utente sempre per esteso, preferenze,
+  decisioni, note e argomenti trattati; mai orari o date, che l'assistente chiede di nuovo agli strumenti. Con regole
+  generiche gemma scriveva «si è presentato dicendo il suo nome» senza il nome, oppure copiava l'orario: le istruzioni
+  contengono un esempio che mostra entrambe le cose.
+- Il riassunto usa un client senza ragionamento con un tetto di 400 token (quello del router, 80, lo troncherebbe).
+- L'agente riceve il riassunto come primo messaggio della conversazione, dopo il prompt di sistema e solo nella
+  chiamata: dentro il prompt di sistema gemma lo ignorava e, in un secondo messaggio di sistema, smetteva di chiamare
+  gli strumenti (prove del 17/11/2026). Il router lo riceve in coda al suo prompt; il revisore no.
+- Se il riassunto non riesce (errore, risposta vuota o troncata al tetto dei token) la cronologia resta com'era, con un `[WARNING]`, e il turno
+  prosegue.
+
+Prova reale da pipe del 17/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`, PowerShell senza `PYTHONIOENCODING`),
+con soglia e turni abbassati solo per la sessione:
+
+```powershell
+$env:RIASSUNTO_SOGLIA = "4"
+$env:RIASSUNTO_TURNI = "1"
+"Ciao, mi chiamo Ottavio.`nQuanto fa 12 per 7?`nQuanti centimetri sono 3 pollici?`nCome mi chiamo?`n/esci" | .\.venv\Scripts\python.exe -m assistente
+Remove-Item Env:RIASSUNTO_SOGLIA, Env:RIASSUNTO_TURNI
+```
+
+```text
+Tu> Assistente> Ciao Ottavio, piacere di conoscerti! Sono qui per assisterti con qualsiasi cosa riguardi il laboratorio. Come posso aiutarti oggi?
+[INFO] instradamento: richiesta strumento calcola {"espressione": "12*7"}
+[INFO] nodo_strumenti: calcola -> 84
+Tu> Assistente> 12 per 7 fa **84**.
+[INFO] riassunto: 7 messaggi -> 5 in 6.9 s
+[INFO] instradamento: richiesta strumento converti {"a": "centimetri", "da": "pollici", "valore": 3}
+[INFO] nodo_strumenti: converti -> 3 in = 7,62 cm
+Tu> Assistente> 3 pollici sono **7,62 cm**.
+[INFO] riassunto: 9 messaggi -> 5 in 12.4 s
+Tu> Assistente> Lei si chiama Ottavio.
+Tu> Alla prossima!
+```
+
+(Righe di router, `nodo_llm` e revisore omesse.) Al quarto turno il primo turno non è più nella cronologia: il nome
+arriva dal riassunto.
+
+**In Docker** (prova del 18/11/2026, dopo `docker compose build`; il `Dockerfile` copia `riassunto.txt`
+nell'immagine), stessa sequenza:
+
+```powershell
+"Ciao, mi chiamo Ottavio.`nQuanto fa 12 per 7?`nQuanti centimetri sono 3 pollici?`nCome mi chiamo?`n/esci" | docker compose run --rm -T -e LOG_LEVEL=INFO -e RIASSUNTO_SOGLIA=4 -e RIASSUNTO_TURNI=1 assistente
+```
+
+Stesso esito della prova locale: `riassunto: 7 messaggi -> 5` prima della terza domanda, `riassunto: 9 messaggi -> 5`
+prima della quarta, e all'ultima domanda `Assistente> Il tuo nome è Ottavio.`.
+
 ## Strumento orologio
 
 Per le domande su ora, data o giorno attuali il modello chiede lo strumento `ora_corrente` e il programma lo
@@ -233,8 +443,343 @@ Tu> Assistente> A New York sono le 05:47 di mercoledì 28 ottobre 2026 (ora EDT)
 Tu> Alla prossima!
 ```
 
-Il grafo ammette al massimo 10 passaggi per turno: se il modello continua a chiedere strumenti la chat stampa
-`Errore: limite di 10 passaggi raggiunto. Turno annullato.`, scarta il turno e prosegue.
+Il grafo ammette al massimo 21 passaggi per turno (10 per l'agente e gli strumenti, più riassunto, router, revisioni
+e pulizia): se il modello continua a chiedere strumenti la chat stampa `Errore: limite di 21 passaggi raggiunto.
+Turno annullato.`,
+scarta il turno e prosegue.
+
+## Giorni e scadenze (funzione nel grafo)
+
+Per le domande sul calendario il modello ha quattro strumenti; il conto lo fa il programma, non il modello:
+
+- `giorni_tra(data, partenza)`: giorni che mancano a `data` o che sono passati, da oggi o da `partenza`
+  (`da lunedì 9 novembre 2026 a venerdì 25 dicembre 2026: mancano 46 giorni`; «è oggi» se la data è oggi);
+- `sposta_data(giorni, data)`: la data tra N giorni (o N giorni fa, con N negativo), da oggi o da `data`
+  (`tra 30 giorni: giovedì 3 dicembre 2026`, con oggi martedì 3 novembre 2026);
+- `giorno_settimana(data)`: la data per esteso con il giorno della settimana (`martedì 14 luglio 1789`);
+- `pasqua(anno)`: la Pasqua cattolica di un anno, dal 1583 (`Pasqua 2027: domenica 28 marzo 2027`); senza anno,
+  quella dell'anno corrente.
+
+Le date si passano come `AAAA-MM-GG` (`2026-12-25`) oppure `MM-GG` (`12-25`) quando l'anno non c'è: in questo caso
+vale la **prossima** occorrenza, oggi compreso (il 29 febbraio senza anno è quello del prossimo anno bisestile).
+«Oggi» è la data dell'orologio dell'assistente nel fuso `APP_TIMEZONE`, non quella UTC.
+
+Quando la richiesta non ha senso lo strumento restituisce un errore in italiano, che il modello deve spiegare senza
+inventare una data: data inesistente (`data non valida «2026-02-30»`), formato non riconosciuto (con i due formati
+ammessi), anno fuori dall'intervallo 1–9999, Pasqua prima del 1583, argomenti mancanti o del tipo sbagliato (per
+esempio `giorni` con i decimali).
+
+Sono **funzioni Python del grafo** (`assistente/calendario.py`), come l'orologio e il convertitore: calcoli puri
+sul calendario più la data di oggi, che il programma ha già; nessun dato esterno né stato, quindi un server
+aggiungerebbe solo un processo e un punto di guasto. Prova reale da pipe del 09/11/2026 (`LOG_LEVEL=INFO`,
+`google/gemma-4-e4b`; uguale in Docker):
+
+```text
+[INFO] instradamento: richiesta strumento giorni_tra {"data": "12-25"}
+[INFO] nodo_strumenti: giorni_tra -> da lunedì 9 novembre 2026 a venerdì 25 dicembre 2026: mancano 46 giorni
+[INFO] nodo_llm: chiamata al modello (4 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 15.5 s
+[INFO] instradamento: nessuno strumento -> fine
+Tu> Assistente> Mancano 46 giorni al 25 dicembre (venerdì 25 dicembre 2026).
+[INFO] nodo_llm: chiamata al modello (6 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 10.6 s
+[INFO] instradamento: richiesta strumento pasqua {"anno": 2027}
+[INFO] nodo_strumenti: pasqua -> Pasqua 2027: domenica 28 marzo 2027
+[INFO] nodo_llm: chiamata al modello (8 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 15.7 s
+[INFO] instradamento: nessuno strumento -> fine
+Tu> Assistente> Pasqua nel 2027 cade di domenica 28 marzo 2027.
+```
+
+## Note (API FastAPI)
+
+Il modello può salvare, elencare e cancellare note con tre strumenti: `salva_nota(testo)`, `elenca_note(cerca)`
+(`cerca` facoltativo, senza distinzione di maiuscole) e `cancella_nota(numero)`. Le note **restano** dopo la chiusura
+dell'assistente; la cronologia della chat invece no. Le salva un servizio separato, `note_api/`: un'API FastAPI con
+un file SQLite, che l'assistente chiama via HTTP con `urllib` (`assistente/note.py`).
+
+Perché un'API e non una funzione nel grafo o MCP: le note sono dati con stato che appartengono a un servizio con un
+proprio ciclo di vita (in Docker un container separato con il suo volume); un'API HTTP le rende disponibili a
+qualsiasi client.
+
+Avvio locale in **due terminali**. Nel primo il servizio (lasciarlo aperto; si ferma con Ctrl+C):
+
+```powershell
+.\.venv\Scripts\python.exe -m note_api
+```
+
+Nel secondo l'assistente, come in «Avvio». Variabili del servizio, tutte facoltative: `NOTE_DB` (file SQLite,
+default `dati/note.db`, cartella creata se manca ed esclusa da Git), `NOTE_HOST` (default `127.0.0.1`),
+`NOTE_PORT` (default `8000`). L'assistente trova il servizio con `NOTE_API_URL` (vedi «Configurazione»).
+
+Endpoint (JSON): `GET /salute`; `POST /note` con `{"testo": "..."}` (da 1 a 500 caratteri, spazi esterni tolti);
+`GET /note?cerca=...` (al massimo 20 note, dalla più recente, con il totale); `DELETE /note/{numero}`. Ogni errore ha
+il corpo `{"errore": "<messaggio in italiano>"}` (`400` testo o numero non validi, `404` nota inesistente).
+
+Errori che il modello riceve e deve spiegare senza inventare note: servizio spento (`servizio note non
+raggiungibile a http://localhost:8000: avviarlo con python -m note_api`), nota inesistente (`nessuna nota con numero
+3`), testo vuoto o troppo lungo. Se il servizio non risponde all'avvio, l'assistente parte comunque con un avviso.
+
+Prova reale da pipe del 09/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`), in tre sessioni separate: le prime due
+con il servizio avviato su un DB di prova (`NOTE_DB`), la terza con il servizio spento:
+
+```text
+[INFO] instradamento: richiesta strumento salva_nota {"testo": "il microscopio 2 va calibrato"}
+[INFO] nodo_strumenti: salva_nota -> nota 1 salvata: «il microscopio 2 va calibrato»
+Tu> Assistente> Ho salvato la nota: "il microscopio 2 va calibrato".
+
+[INFO] instradamento: richiesta strumento elenca_note {}
+[INFO] nodo_strumenti: elenca_note -> 1 nota: n. 1 (9/11/2026 11:24) il microscopio 2 va calibrato
+[INFO] instradamento: richiesta strumento cancella_nota {"numero": 1}
+[INFO] nodo_strumenti: cancella_nota -> nota 1 cancellata: «il microscopio 2 va calibrato»
+Tu> Assistente> Ho cancellato la nota n. 1 ("il microscopio 2 va calibrato").
+
+[WARNING] servizio note non raggiungibile a http://localhost:8000: gli strumenti delle note risponderanno con un errore
+[INFO] instradamento: richiesta strumento salva_nota {"testo": "la centrifuga fa rumore"}
+[WARNING] nodo_strumenti: errore dello strumento salva_nota: servizio note non raggiungibile a http://localhost:8000: avviarlo con python -m note_api
+Tu> Assistente> Mi dispiace, ma non è stato possibile salvare la nota perché il servizio delle note non risulta raggiungibile.
+```
+
+## Convertitore (funzione nel grafo)
+
+Per le conversioni di unità il modello chiede lo strumento `converti`, con tre argomenti: `valore` (un numero),
+`da` e `a` (le unità). Le unità ammesse sono:
+
+- lunghezze: `mm`, `cm`, `m`, `km`, `in` (pollici), `ft` (piedi), `mi` (miglia);
+- pesi: `mg`, `g`, `kg`, `t` (tonnellate), `lb` (libbre), `oz` (once);
+- temperature: `°C`, `°F`, `K`.
+
+Il modello può scrivere il simbolo o il nome italiano, al singolare o al plurale e senza badare alle maiuscole
+(`centimetri`, `Fahrenheit`, `libbre`). Lo strumento restituisce un testo come `25 m = 0,025 km`: il valore di
+partenza com'è, il risultato arrotondato a 6 cifre significative, con la virgola decimale e mai in notazione
+esponenziale. Il conto lo fa il programma, non il modello.
+
+Quando la conversione non ha senso lo strumento restituisce un errore in italiano, che il modello deve spiegare
+senza inventare un numero: grandezze diverse (`non si può convertire un peso (kg) in una lunghezza (m)`), unità
+fuori elenco (`unità non supportata «iarde»`, con l'elenco delle unità), temperature sotto lo zero assoluto, pesi
+o lunghezze negativi, valore non numerico.
+
+Come l'orologio, il convertitore è una **funzione Python del grafo** (`assistente/convertitore.py`): è un calcolo
+puro e locale, senza dati esterni né stato, quindi un server separato aggiungerebbe solo un processo e un punto di
+guasto. Prova reale da pipe del 03/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`; uguale in Docker):
+
+```text
+[INFO] instradamento: richiesta strumento converti {"a": "km", "da": "metri", "valore": 25}
+[INFO] nodo_strumenti: converti -> 25 m = 0,025 km
+[INFO] nodo_llm: chiamata al modello (4 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 18.7 s
+[INFO] instradamento: nessuno strumento -> fine
+Tu> Assistente> 25 metri sono **0,025 km**.
+```
+
+Nella stessa prova, a «Quanti metri sono 5 kg?» il modello ha risposto da solo, senza chiamare lo strumento, che
+chilogrammi e metri misurano grandezze diverse: la risposta era corretta, ma la spiegazione non veniva dal
+programma. I messaggi d'errore dello strumento sono verificati dai test automatici.
+
+## Catalogo della strumentazione (MCP)
+
+Per le domande sugli apparecchi del laboratorio il modello ha tre strumenti sugli stessi dati, offerti da un secondo
+server MCP (`catalogo_mcp/`, avviato dall'assistente con `python -m catalogo_mcp`, come la calcolatrice):
+
+- `cerca_apparecchi(testo)`: apparecchi con quel testo nel codice, nel nome, nel tipo o nelle note («dov'è la
+  centrifuga?»);
+- `dettaglio_apparecchio(codice)`: tutte le informazioni di un apparecchio, per esempio `MIC-02`;
+- `elenca_apparecchi(stanza, stato)`: elenco filtrato, con filtri facoltativi; stati ammessi `disponibile`,
+  `in uso`, `in manutenzione`, `fuori servizio`.
+
+Gli oggetti del laboratorio si chiamano «apparecchi» per non confonderli con gli strumenti del modello. I dati sono
+in `catalogo_mcp/apparecchi.json` (dieci apparecchi di esempio, non reali), letto all'avvio del server: una modifica
+vale dal riavvio dell'assistente, e un file non valido impedisce l'avvio con un messaggio che nomina il file.
+Ricerca e filtri non distinguono le maiuscole. Codice inesistente (`nessun apparecchio con codice «XYZ-99»`), stato
+non ammesso (con l'elenco degli stati) e ricerca vuota sono errori in italiano, che il modello deve riferire senza
+inventare apparecchi. Il catalogo è in sola lettura.
+
+Perché MCP: un server che raggruppa più strumenti su una stessa fonte di dati è il caso tipico del protocollo; il
+client (`assistente/client_mcp.py`, ora per più server) ne scopre il catalogo all'avvio. Se uno dei due server MCP
+non parte, l'avvio termina con un errore che nomina quel server e codice 1.
+
+Prova reale da pipe del 09/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`; uguale in Docker):
+
+```text
+[INFO] client_mcp: catalogo di catalogo letto in 0.9 s: cerca_apparecchi (...); dettaglio_apparecchio (...); elenca_apparecchi (...)
+[INFO] instradamento: richiesta strumento cerca_apparecchi {"testo": "centrifuga"}
+[INFO] nodo_strumenti: cerca_apparecchi -> CEN-01 Centrifuga da banco (centrifuga) — stanza A03, disponibile, calibrato il 20/06/2026
+CEN-02 Centrifuga refrigerata (centrifuga) — stanza A03, fuori servizio, calibrato il 30/11/2025
+Tu> Assistente> Ci sono due centrifughe registrate:
+[INFO] instradamento: richiesta strumento elenca_apparecchi {"stato": "in manutenzione"}
+[INFO] nodo_strumenti: elenca_apparecchi -> MIC-02 Microscopio ottico 2 (microscopio) — stanza B12, in manutenzione, calibrato il 10/03/2026
+PHM-01 pHmetro da banco (pHmetro) — stanza A01, in manutenzione, calibrato il 14/02/2026
+Tu> Assistente> Ci sono due apparecchi attualmente in manutenzione:
+```
+
+(Le descrizioni del catalogo sono abbreviate con `...`; le risposte continuano su più righe con l'elenco.)
+
+## Calcolatrice (strumento MCP)
+
+Per i calcoli il modello chiede lo strumento `calcola`, con un solo argomento testuale `espressione` (per
+esempio `12.5*8-3`). Sono ammessi numeri (con il punto per i decimali), `+ - * / // % **` e parentesi; `%` è il
+resto della divisione, non la percentuale. Il risultato è calcolato dal programma, mai dal modello, e senza
+eseguire codice: l'espressione viene analizzata e si valutano solo le operazioni ammesse.
+
+A differenza dell'orologio, che è una funzione Python del grafo, la calcolatrice è un **server MCP**: un
+programma separato che dichiara i propri strumenti con il protocollo MCP. L'assistente non conosce in anticipo
+lo strumento: lo scopre chiedendo il catalogo al server.
+
+- Server: cartella `calcolatrice_mcp/` (`calcolo.py` la logica pura, `server.py` il server FastMCP); si avvia con
+  `python -m calcolatrice_mcp` e comunica su stdin/stdout (trasporto stdio). Non serve avviarlo a mano: lo avvia
+  l'assistente.
+- Client: `assistente/client_mcp.py`. All'avvio legge il catalogo e rende sincroni gli strumenti per il grafo.
+
+Il percorso di una domanda è quello dell'orologio, con un passo in più all'inizio:
+
+1. **discovery**, all'avvio: l'assistente avvia il server e ne legge il catalogo (nome, descrizione e schema di
+   `calcola`);
+2. **richiesta**: il modello risponde con una richiesta strutturata di `calcola` invece che con un testo;
+3. **esecuzione**: il nodo degli strumenti chiama il server MCP, che calcola il risultato;
+4. **`ToolMessage`**: il risultato torna al modello come messaggio correlato alla richiesta; il modello scrive la
+   risposta finale.
+
+Prova da pipe (prima domanda: un calcolo; seconda: una divisione per zero):
+
+```powershell
+"Quanto fa 12,5 per 8 meno 3?`nQuanto fa 5 diviso 0?`n/esci" | .\.venv\Scripts\python.exe -m assistente
+```
+
+Con `LOG_LEVEL=INFO` i quattro passi si riconoscono nei log su stderr (esecuzione reale del 03/11/2026 con
+`google/gemma-4-e4b`; la riga del catalogo è accorciata):
+
+```text
+[INFO] client_mcp: catalogo di calcolatrice letto in 2.4 s: calcola (Calcola un'espressione aritmetica e restituisce il risultato esatto; ...)
+[INFO] nodo_llm: chiamata al modello (2 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 18.6 s
+[INFO] instradamento: richiesta strumento calcola {"espressione": "12.5*8-3"}
+[INFO] client_mcp: calcola eseguito in 2.6 s
+[INFO] nodo_strumenti: calcola -> 97
+[INFO] nodo_llm: chiamata al modello (4 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 27.4 s
+[INFO] instradamento: nessuno strumento -> fine
+Tu> Assistente> Il risultato di 12,5 per 8 meno 3 è 97.
+```
+
+Il modello ha scritto `12,5` all'italiana nella domanda ma `12.5` nell'argomento, come chiede la descrizione dello
+strumento. Ogni chiamata a `calcola` avvia un nuovo processo del server: la discovery e ogni calcolo richiedono
+tra 2,5 e 3 s in locale e poco più di 1 s nel container Docker (catalogo 1,3 s, `calcola` 1,1 s), molto meno della
+risposta del modello (circa 20 s).
+
+**Errori controllati.** Un'espressione non valida non interrompe il turno: il server risponde con un messaggio
+d'errore in italiano, che arriva al modello come `ToolMessage` con stato `error`, e nel log compare un
+`[WARNING]`. Per la seconda domanda:
+
+```text
+[INFO] instradamento: richiesta strumento calcola {"espressione": "5/0"}
+[WARNING] nodo_strumenti: errore dello strumento calcola: divisione per zero
+[INFO] nodo_llm: chiamata al modello (8 messaggi)
+[INFO] nodo_llm: risposta ricevuta in 23.8 s
+[INFO] instradamento: nessuno strumento -> fine
+Tu> Assistente> Non è possibile calcolare 5 diviso 0; si tratta di un errore di divisione per zero.
+```
+
+Gli altri errori controllati: espressione vuota o più lunga di 200 caratteri, sintassi non valida, elementi non
+ammessi (nomi, funzioni, testo), virgola decimale (`2,5`: si suggerisce il punto), `^` invece di `**`, esponente
+oltre 100 in valore assoluto, numeri oltre `10**100` in valore assoluto, risultato non reale. Se il server non
+risponde durante la chat (errore di trasporto), anche il modello riceve un `ToolMessage` d'errore
+(`server MCP calcolatrice non raggiungibile: ...`) e la chat continua; nel log compaiono due `[WARNING]`, uno di
+`client_mcp` e uno di `nodo_strumenti`. Questo caso è coperto solo dai test automatici. Se il server non parte
+all'avvio, il programma termina con codice 1 (vedi «Diagnosi»).
+
+## Preferenze dell'utente (resource MCP)
+
+Le preferenze dell'utente sono nel file `preferenze.json` della cartella del progetto:
+
+```json
+{"lingua": "italiano", "fuso": "Europe/Rome", "stile": "sintetico"}
+```
+
+Un terzo server MCP, `preferenze_mcp/` (`python -m preferenze_mcp [percorso]`, file predefinito `preferenze.json`),
+le offre come **resource** `utente://preferenze` (`application/json`) e non come strumento: sono dati che il
+programma legge, non un'azione che il modello sceglie. Il server restituisce il testo del file così com'è (toglie solo
+un BOM iniziale) e lo rilegge a ogni richiesta; i controlli li fa l'assistente (`assistente/preferenze.py`). Il
+client (`assistente/client_mcp.py`) legge la resource una volta, all'avvio, e le frasi che ne derivano vanno in cima
+al prompt di sistema dell'agente: una modifica al file vale dalla sessione successiva. Router e revisore non le
+ricevono; il revisore ha la regola che la lingua della risposta non è mai un motivo per farla riscrivere.
+
+| Campo | Valori ammessi | Predefinito |
+|---|---|---|
+| `lingua` | qualsiasi testo non vuoto (`italiano`, `inglese`, ...) | `italiano` |
+| `fuso` | nome IANA (`Europe/Rome`, `America/New_York`, ...) | il fuso di `APP_TIMEZONE` |
+| `stile` | `sintetico` o `dettagliato` | nessuna istruzione di stile |
+
+Spazi ai lati e maiuscole dello stile sono ignorati, come i campi in più. Il fuso è quello che l'agente passa a
+`ora_corrente` quando l'utente non nomina un'altra città («Che ore sono a Tokyo?» usa ancora `Asia/Tokyo`). Con gemma
+la frase «chiama ora_corrente con fuso X» veniva ignorata (lo strumento era chiamato senza fuso, quindi con
+`APP_TIMEZONE`); il prompt dice «passa sempre l'argomento fuso="X" (non ometterlo)», che viene seguita (prove del
+18/11/2026).
+
+Gli errori non fermano mai l'avvio, a differenza di quelli della calcolatrice e del catalogo:
+
+- campo mancante o non valido: si usa il suo predefinito, con un avviso per campo, per esempio
+  `[WARNING] preferenze: fuso non valido («Marte/Base»), si usa Europe/Rome` oppure
+  `[WARNING] preferenze: stile mancante, si usa nessuno stile`;
+- file mancante, testo che non è JSON o non è un oggetto, server che non parte:
+  `[WARNING] preferenze: resource non disponibile (<motivo>), valori predefiniti` e tutti i predefiniti.
+
+Limite noto: il fuso delle preferenze vale solo per `ora_corrente`; gli strumenti del calendario e delle note
+calcolano «oggi» con `APP_TIMEZONE`.
+
+Prova reale da pipe del 18/11/2026 (`LOG_LEVEL=INFO`, `google/gemma-4-e4b`, PowerShell senza `PYTHONIOENCODING`, con
+la codifica UTF-8 impostata come in «Avvio»), prima con il file versionato:
+
+```powershell
+$env:LOG_LEVEL = "INFO"
+"Che ore sono?`nSpiegami in due frasi che cos'è una pipetta.`n/esci" | .\.venv\Scripts\python.exe -m assistente
+```
+
+```text
+[INFO] preferenze: resource utente://preferenze letta in 2.5 s: lingua=italiano, fuso=Europe/Rome, stile=sintetico
+[INFO] instradamento: richiesta strumento ora_corrente {"fuso": "Europe/Rome"}
+[INFO] nodo_strumenti: ora_corrente -> mercoledì 2026-11-18T14:19:38+01:00 (Europe/Rome)
+Tu> Assistente> Sono le 14:19:38 di mercoledì 2026-11-18 (Europe/Rome).
+Tu> Assistente> Una pipetta è un apparecchio di laboratorio utilizzato per misurare e trasferire volumi precisi di liquidi, essenziale in chimica e biologia. Esistono diversi tipi, come le micropipette o quelle volumetriche, adatte a specifiche applicazioni che richiedono alta accuratezza nel dosaggio.
+Tu> Alla prossima!
+```
+
+Poi con un altro file e le stesse domande, e infine il file versionato ripristinato:
+
+```powershell
+'{"lingua": "inglese", "fuso": "America/New_York", "stile": "dettagliato"}' | Out-File -Encoding ascii preferenze.json
+"Che ore sono?`nSpiegami in due frasi che cos'è una pipetta.`n/esci" | .\.venv\Scripts\python.exe -m assistente
+git checkout -- preferenze.json
+```
+
+```text
+[INFO] preferenze: resource utente://preferenze letta in 2.8 s: lingua=inglese, fuso=America/New_York, stile=dettagliato
+[INFO] instradamento: richiesta strumento ora_corrente {"fuso": "America/New_York"}
+[INFO] nodo_strumenti: ora_corrente -> mercoledì 2026-11-18T08:16:18-05:00 (America/New_York)
+Tu> Assistente> It is Wednesday, November 18, 2026, at 8:16:18 AM (America/New_York).
+Tu> Assistente> A pipette is a laboratory instrument used to accurately measure and transfer small volumes of liquid. It consists of a calibrated tube that allows precise dispensing of solutions, which is essential for various scientific procedures like mixing reagents or preparing samples.
+Tu> Alla prossima!
+```
+
+(Righe dei cataloghi MCP, delle note, di router, `nodo_llm` e revisore omesse.) La riga della lettura delle
+preferenze compare all'avvio, prima di ogni chiamata al modello. Sulla seconda domanda il router è arrivato al tetto
+dei token e ha passato la domanda all'agente, come descritto in «Router dell'ambito».
+
+**In Docker.** Il `Dockerfile` copia `preferenze_mcp/` e `preferenze.json` nell'immagine e `compose.yaml` monta il
+`preferenze.json` dell'host in sola lettura su `/app/preferenze.json`, così una modifica vale dalla sessione
+successiva senza `docker compose build`. Prova del 18/11/2026, dopo `docker compose build`, con la stessa riga UTF-8
+della pipe locale:
+
+```powershell
+"Che ore sono?`n/esci" | docker compose run --rm -T -e LOG_LEVEL=INFO assistente
+'{"lingua": "inglese", "fuso": "America/New_York", "stile": "dettagliato"}' | Out-File -Encoding ascii preferenze.json
+"Che ore sono?`n/esci" | docker compose run --rm -T -e LOG_LEVEL=INFO assistente
+git checkout -- preferenze.json
+```
+
+Con il file versionato: `lingua=italiano, fuso=Europe/Rome, stile=sintetico`, `ora_corrente {"fuso": "Europe/Rome"}`,
+`Assistente> Sono le 16:23:13 di mercoledì 18 novembre 2026 (Europe/Rome).`. Con il file modificato sull'host, senza
+ricostruire: `lingua=inglese, fuso=America/New_York, stile=dettagliato`, `ora_corrente {"fuso": "America/New_York"}`,
+`Assistente> It is Wednesday, November 18, 2026, at 10:27:50 AM (America/New_York).`.
 
 ## Mostrare e nascondere i log
 
@@ -284,7 +829,9 @@ rispondere) e un `.env` compilato come in «Configurazione».
 - `Dockerfile`: immagine `python:3.14.7-slim`, dipendenze installate da `requirements.txt` prima della copia del
   codice (cache dei layer), copia di `assistente/`, avvio con `python -m assistente`. `requirements-dev.txt` e i
   test restano fuori dall'immagine.
-- `compose.yaml`: servizio `assistente` con le variabili di `.env`, ma con `LMSTUDIO_BASE_URL` impostata a
+- `compose.yaml`: servizio `note` (stessa immagine, `python -m note_api`, note nel volume `note-dati` su `/app/dati`)
+  e servizio `assistente` con `NOTE_API_URL=http://note:8000` e `depends_on: note`, così `docker compose run`
+  avvia anche il servizio delle note; `assistente` ha le variabili di `.env`, ma con `LMSTUDIO_BASE_URL` impostata a
   `http://host.docker.internal:1234/v1` (nel container `localhost` è il container stesso, non il computer host),
   `stdin_open` e `tty` per la chat da tastiera, `host.docker.internal` mappato sull'host; nessuna porta pubblicata.
 - `.dockerignore`: `.env`, `.venv`, cache, `.git`, `tests`, `docs` non entrano nell'immagine. Il `.env` arriva al
@@ -320,6 +867,11 @@ Tu> Alla prossima!
 
 Il container ha raggiunto LM Studio sull'host e la richiesta di `ora_corrente` e la sua esecuzione compaiono
 nei log come in locale. Con l'input da pipe la scritta `Ragionando...` non compare.
+
+Note in Docker: la prova da pipe del 09/11/2026 ha salvato una nota in una sessione e l'ha ritrovata in una seconda
+sessione (`docker compose run --rm -T -e LOG_LEVEL=INFO assistente`, due volte), con le stesse righe di log della
+sezione «Note». `docker compose down` ferma e rimuove anche il container `note`, ma il volume resta (`docker volume
+ls --filter name=note-dati` mostra `assistente-laboratorio_note-dati`).
 
 Chat interattiva: si avvia con `run`, non con `up` (vedi «Diagnosi»).
 
@@ -368,6 +920,27 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
 
 ## Diagnosi
 
+- **Dopo un po' l'assistente dimentica qualcosa detto all'inizio** (per esempio il nome): controllare nel log la
+  riga `riassunto: N messaggi -> M`; rendere più esplicito `riassunto.txt` su che cosa conservare, oppure alzare
+  `RIASSUNTO_TURNI` o `RIASSUNTO_SOGLIA` (più turni intatti, prompt più lunghi). Un `[WARNING] riassunto: errore (...)`,
+  `riassunto: risposta vuota` o `riassunto: risposta troncata` lascia la cronologia com'era: la risposta arriva comunque. `RIASSUNTO_SOGLIA` o
+  `RIASSUNTO_TURNI` non interi o minori di 1 fermano l'avvio con `Errore: RIASSUNTO_... non è valido ...` e codice 1;
+  se manca `riassunto.txt`, `Errore: File del riassunto ... non trovato. Controllare RIASSUNTO_FILE ...`.
+- **Il revisore fa riscrivere risposte corrette** (`revisore: non coerente (...)` su risposte complete): rendere
+  più permissivo `revisore.txt` oppure disattivare i giri con `REVISIONI_MAX=0`. `REVISIONI_MAX` non intero o
+  negativo ferma l'avvio con `Errore: REVISIONI_MAX non è valido ...` e codice 1.
+- **Una domanda legittima viene rifiutata** (`router: fuori ambito (...)` nel log): allargare la descrizione in
+  `ambito.txt` (vale dal riavvio dell'assistente). Se manca il file, l'avvio termina con `Errore: File dell'ambito
+  ... non trovato. Controllare AMBITO_FILE ...` e codice 1. Un `[WARNING] router: errore (...)` o `router: decisione
+  illeggibile` indica che il router non ha deciso: la domanda passa comunque all'agente.
+- **Il catalogo non parte** (`Errore: server MCP catalogo non avviato (...)` all'avvio, codice 1): di solito
+  `catalogo_mcp/apparecchi.json` non è valido dopo una modifica (JSON malformato, campo mancante, stato non ammesso,
+  data non `AAAA-MM-GG`). Il messaggio del server si legge con `.\.venv\Scripts\python.exe -m catalogo_mcp`, che con
+  un file valido resta in attesa sullo standard input (chiudere con Ctrl+C).
+- **Le note non funzionano** («servizio note non raggiungibile ...» nel log o nella risposta): in locale avviare
+  `.\.venv\Scripts\python.exe -m note_api` in un secondo terminale e controllare `NOTE_API_URL`. Con il servizio
+  spento l'assistente parte comunque, con un avviso; su Windows l'avvio richiede qualche secondo in più per i
+  tentativi di connessione.
 - **Il server non è disponibile**: l'avvio termina con
   `Errore: Impossibile leggere l'elenco dei modelli da http://.../v1/models: ...` e codice 1. Avviare il
   server locale in LM Studio e controllare `LMSTUDIO_BASE_URL`. Provato con `LMSTUDIO_BASE_URL=http://localhost:9/v1`:
@@ -401,6 +974,36 @@ Il container mostra l'ora in UTC, l'host in ora di Roma (CET, UTC+01:00): le due
   malformata) il programma stampa `Errore: il modello non ha prodotto una risposta valida. Turno annullato.` e
   scrive un avviso `[WARNING]` nel log. Verificato solo dai test automatici con un modello finto, non con il
   modello reale.
+
+Per la calcolatrice MCP (vedi «Calcolatrice») si controllano i livelli in ordine, dal server alla risposta:
+
+1. **Il server da solo**, senza modello e senza assistente:
+   `.\.venv\Scripts\python.exe -m pytest tests/test_server_mcp.py -v` (quattro test: catalogo, invocazione
+   diretta, due errori). Se fallisce, il problema è nel server o nelle dipendenze MCP.
+2. **Discovery all'avvio**: con `LOG_LEVEL=INFO` la prima riga è
+   `[INFO] client_mcp: catalogo di calcolatrice letto in ... s: calcola (...)`. Se il server non parte, l'avvio
+   termina con codice 1 e un messaggio come
+   `Errore: server MCP calcolatrice non avviato (python.exe -m calcolatrice_mcp): Connection closed`, preceduto
+   dall'errore del processo del server (per esempio un modulo mancante). Il messaggio è stato provato il
+   03/11/2026 chiamando il client con un modulo inesistente; il primo controllo è avviare dalla cartella del
+   progetto con l'ambiente virtuale completo (`requirements.txt`).
+3. **Richiesta del modello**: `[INFO] instradamento: richiesta strumento calcola {"espressione": "..."}`. Se manca,
+   il modello ha risposto senza chiamare lo strumento e il numero non viene dalla calcolatrice.
+4. **Esecuzione**: `[INFO] client_mcp: calcola eseguito in ... s`. Un `[WARNING] client_mcp: server MCP
+   calcolatrice non raggiungibile: ...` indica un errore di trasporto (il server si è interrotto).
+5. **`ToolMessage`**: `[INFO] nodo_strumenti: calcola -> <risultato>` è il risultato restituito al modello; un
+   `[WARNING] nodo_strumenti: errore dello strumento calcola: <motivo>` è un errore controllato (per esempio
+   `divisione per zero`) che il modello riceve e deve spiegare senza inventare un numero.
+
+Per il convertitore (vedi «Convertitore») con `LOG_LEVEL=INFO`: `[INFO] instradamento: richiesta strumento
+converti {...}` mostra la richiesta del modello e `[INFO] nodo_strumenti: converti -> <risultato>` il risultato; un
+errore controllato (per esempio unità non supportata) compare come `[WARNING] nodo_strumenti: errore dello
+strumento converti: <motivo>`. Se manca la riga `richiesta strumento converti`, il modello ha risposto senza lo
+strumento e il numero non viene dal programma.
+
+Per giorni e scadenze (vedi «Giorni e scadenze») vale lo stesso con `giorni_tra`, `sposta_data`,
+`giorno_settimana` e `pasqua`: senza la riga `richiesta strumento <nome>` la data o il numero non vengono dal
+programma. Se il conteggio sembra spostato di un giorno, controllare `APP_TIMEZONE`: «oggi» è calcolato in quel fuso.
 
 Con Docker Compose (sintomo, primo controllo):
 
