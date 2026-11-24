@@ -1,5 +1,6 @@
 """Client MCP: legge il catalogo dei server MCP (calcolatrice e catalogo) e rende sincroni i loro strumenti;
-legge anche la resource delle preferenze dell'utente, che l'host usa come contesto e non diventa uno strumento.
+legge anche la resource delle preferenze dell'utente, che l'host usa come contesto e non diventa uno strumento,
+e i prompt del server dei prompt (elenco all'avvio, testo compilato a ogni `/prompt`), che sceglie l'utente.
 
 È l'unico modulo dell'agente che importa `asyncio` e `langchain_mcp_adapters`: il resto del programma
 (grafo, CLI) resta sincrono e vede soltanto strumenti LangChain ordinari e testo.
@@ -14,14 +15,18 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from mcp.shared.exceptions import McpError
+from mcp.types import CONNECTION_CLOSED
 
 logger = logging.getLogger(__name__)
 
 CARTELLA_PROGETTO = Path(__file__).resolve().parent.parent
 
 PREFISSO_INGLESE = re.compile(r"^Error executing tool \S+: ")
+PREFISSO_PROMPT = re.compile(r"^Error rendering prompt \S+: ")
 
 
 @dataclass(frozen=True)
@@ -42,6 +47,27 @@ SERVER_MCP = (CALCOLATRICE, CATALOGO)
 # Server della sola resource delle preferenze: non espone strumenti e non è tra i server degli strumenti.
 PREFERENZE = ServerMCP("preferenze", ("-m", "preferenze_mcp"), ())
 URI_PREFERENZE = "utente://preferenze"
+
+# Server dei soli prompt: non espone strumenti e non è tra i server degli strumenti.
+PROMPT = ServerMCP("prompt", ("-m", "prompt_mcp"), ())
+
+
+@dataclass(frozen=True)
+class ArgomentoPrompt:
+    """Un argomento di un prompt come lo descrive `prompts/list` (descrizione vuota se il server non la dà)."""
+
+    nome: str
+    descrizione: str
+    obbligatorio: bool
+
+
+@dataclass(frozen=True)
+class DefinizionePrompt:
+    """Un prompt del server: nome, descrizione e argomenti nell'ordine del server."""
+
+    nome: str
+    descrizione: str
+    argomenti: tuple[ArgomentoPrompt, ...]
 
 
 class ErroreMCP(Exception):
@@ -65,11 +91,17 @@ def _dettaglio(errore: BaseException) -> str:
     return str(foglia) or type(foglia).__name__
 
 
-def _causa_prima(errore: BaseException) -> str:
-    """Testo della causa più interna di `errore` (per esempio l'errore del server dietro quello dell'adattatore)."""
+def _eccezione_prima(errore: BaseException) -> BaseException:
+    """La causa più interna di `errore` (per esempio l'errore del server dietro quello dell'adattatore)."""
     foglia = _prima_foglia(errore)
     while foglia.__cause__ is not None:
         foglia = _prima_foglia(foglia.__cause__)
+    return foglia
+
+
+def _causa_prima(errore: BaseException) -> str:
+    """Testo della causa più interna di `errore` o, se vuoto, il nome del suo tipo."""
+    foglia = _eccezione_prima(errore)
     return str(foglia) or type(foglia).__name__
 
 
@@ -201,3 +233,55 @@ def leggi_resource_mcp(server: ServerMCP, uri: str) -> str:
 def leggi_preferenze_mcp() -> str:
     """Il testo della resource delle preferenze dell'utente (`utente://preferenze`)."""
     return leggi_resource_mcp(PREFERENZE, URI_PREFERENZE)
+
+
+def leggi_elenco_prompt(server: ServerMCP = PROMPT) -> list[DefinizionePrompt]:
+    """Avvia il server dei prompt e ne legge l'elenco (`prompts/list`), nell'ordine del server.
+
+    Server che non parte o elenco che non si legge: `ErroreMCP` con un messaggio in italiano. Nessuna riga di log.
+    """
+    client = MultiServerMCPClient({server.nome: _connessione(server)})
+
+    async def elenco():
+        async with client.session(server.nome) as sessione:
+            return await sessione.list_prompts()
+
+    try:
+        risultato = _esegui(elenco())
+    except Exception as errore:
+        raise ErroreMCP(
+            f"elenco dei prompt non letto dal server MCP {server.nome} ({_comando(server)}): {_causa_prima(errore)}"
+        ) from errore
+    return [
+        DefinizionePrompt(
+            p.name,
+            p.description or "",
+            tuple(ArgomentoPrompt(a.name, a.description or "", bool(a.required)) for a in p.arguments or ()),
+        )
+        for p in risultato.prompts
+    ]
+
+
+def richiedi_prompt(nome: str, argomenti: dict[str, str], server: ServerMCP = PROMPT) -> str:
+    """Chiede al server il prompt `nome` con gli `argomenti` (`prompts/get`) e restituisce il testo compilato.
+
+    Errore del server (per esempio un valore non ammesso): `ErroreMCP` con il suo messaggio, senza il prefisso
+    inglese di FastMCP. Server che non parte, o risposta che non è un solo messaggio utente di testo: `ErroreMCP`.
+    """
+    client = MultiServerMCPClient({server.nome: _connessione(server)})
+    try:
+        messaggi = _esegui(client.get_prompt(server.nome, nome, arguments=argomenti))
+    except Exception as errore:
+        causa = _eccezione_prima(errore)
+        if isinstance(causa, McpError) and causa.error.code != CONNECTION_CLOSED:   # il server ha risposto
+            motivo = PREFISSO_PROMPT.sub("", str(causa))
+            raise ErroreMCP(f"prompt {nome} non letto dal server MCP {server.nome}: {motivo}") from errore
+        raise ErroreMCP(
+            f"prompt {nome} non letto dal server MCP {server.nome} ({_comando(server)}): {_causa_prima(errore)}"
+        ) from errore
+    if len(messaggi) != 1 or not isinstance(messaggi[0], HumanMessage) or not isinstance(messaggi[0].content, str):
+        raise ErroreMCP(
+            f"prompt {nome} non letto dal server MCP {server.nome}: "
+            "risposta inattesa (atteso un solo messaggio utente di testo)"
+        )
+    return messaggi[0].content

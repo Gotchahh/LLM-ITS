@@ -7,7 +7,13 @@ from pathlib import Path
 
 from assistente.calendario import crea_strumenti_calendario
 from assistente.cli import crea_indicatore_attesa, esegui_chat, prepara_terminale
-from assistente.client_mcp import ErroreMCP, carica_strumenti_mcp, leggi_preferenze_mcp
+from assistente.client_mcp import (
+    ErroreMCP,
+    carica_strumenti_mcp,
+    leggi_elenco_prompt,
+    leggi_preferenze_mcp,
+    richiedi_prompt,
+)
 from assistente.config import (
     ErroreConfigurazione,
     carica_configurazione,
@@ -29,6 +35,7 @@ from assistente.modello import (
 )
 from assistente.note import crea_strumenti_note, servizio_raggiungibile
 from assistente.preferenze import blocco_preferenze, carica_preferenze
+from assistente.prompt import carica_prompt
 from assistente.strumenti import crea_strumento_orologio
 
 logger = logging.getLogger("assistente")
@@ -36,10 +43,11 @@ logger = logging.getLogger("assistente")
 
 def main() -> int:
     """Legge la configurazione, controlla il server e il modello, carica gli strumenti MCP, legge le preferenze
-    dell'utente dalla resource MCP, poi avvia la chat.
+    dell'utente dalla resource MCP e l'elenco dei prompt MCP, poi avvia la chat.
 
     Restituisce 1 se la configurazione non è valida, LM Studio non è raggiungibile
     o un server MCP degli strumenti non parte. Preferenze non disponibili: valori predefiniti e WARNING, la chat parte.
+    Elenco dei prompt non disponibile: WARNING, la chat parte con i comandi /prompt disattivati.
     """
     prepara_terminale(sys.stdin, sys.stdout, sys.stderr)
     try:
@@ -55,6 +63,7 @@ def main() -> int:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1
     preferenze = carica_preferenze(leggi_preferenze_mcp, config.fuso)
+    elenco_prompt = carica_prompt(leggi_elenco_prompt)
     if not servizio_raggiungibile(config.note_url):
         logger.warning(
             "servizio note non raggiungibile a %s: gli strumenti delle note risponderanno con un errore",
@@ -80,6 +89,8 @@ def main() -> int:
         config.base_url,
         attesa=crea_indicatore_attesa(sys.stdin, sys.stdout),
         livello_log=config.livello_log,
+        elenco_prompt=elenco_prompt,
+        richiedi_prompt=richiedi_prompt,
     )
     return 0
 

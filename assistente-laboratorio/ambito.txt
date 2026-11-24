@@ -9,7 +9,7 @@ In ambito ("conversazione"):
 - tutto ciò che l'assistente sa fare con i suoi strumenti: ora e data attuali (anche in altre città),
   giorni mancanti a una data o tra due date, giorno della settimana, Pasqua, calcoli, conversioni di unità,
   note da salvare, elencare o cancellare, apparecchi del laboratorio e loro stato;
-- saluti, ringraziamenti, informazioni che l'utente dà su di sé, domande sulla conversazione in corso;
+- saluti, ringraziamenti, informazioni che l'utente dà su di sé, domande sulla conversazione in corso e richieste di riassumerla;
 - domande di seguito che completano una domanda precedente in ambito.
 
 Fuori ambito ("fuori_ambito"): tutto il resto, per esempio sport, poesie e narrativa, ricette, gossip,
